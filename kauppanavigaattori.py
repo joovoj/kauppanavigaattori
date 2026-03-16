@@ -230,138 +230,131 @@ def get_recipe_links(product_name: str, categories: list) -> list:
         links.append({"site": "🐟 Kalareseptit", "url": f"https://www.kotikokki.net/reseptit/haku/?search={term}+kala", "desc": "Kalareseptit"})
     return links
 
+# ── FINELI – SUOMALAINEN ELINTARVIKETIETOKANTA (THL) ─────────────────────────
+# Lähde: Fineli®, THL (thl.fi/fineli), CC BY 4.0
+# Sisältää yleisimmät suomalaiset elintarvikkeet ravintosisältöineen per 100 g.
+# Täydentää Open Food Facts -dataa tarkemmilla suomalaisilla arvoilla.
 
-# ── TUOTEOSASTO-TUNNISTUS ─────────────────────────────────────────────────────
-DEPARTMENT_KEYWORDS = {
-    "🥛 Maitotuotteet & munat": ["milk","dairy","maito","jogurt","yogurt","juusto","cheese","kerma","cream","voi","butter","kananmuna","egg","quark","viili","piimä"],
-    "🥩 Liha & kala":           ["meat","liha","beef","pork","chicken","kana","sika","nauta","lohi","salmon","fish","kala","silli","tonnikala","tuna","makkara","sausage","broiler"],
-    "🥦 Kasvikset & hedelmät":  ["vegetable","fruit","kasvis","hedelmä","vihannes","tomaatti","tomato","kurkku","salaatti","salad","omena","apple","banaani","banana","porkkana","carrot","peruna","potato","paprika","sipuli","onion","mango","appelsiini"],
-    "🍞 Leipä & leivonnaiset":  ["bread","leipä","ruisleipä","pulla","bun","cake","kakku","keksi","cookie","cracker","muffin","bagel","wrap","tortilla","rye"],
-    "🥫 Säilykkeet & kuivatuotteet": ["pasta","rice","riisi","noodle","can","säilyke","legume","papu","linssi","lentil","chickpea","herne","oat","kaura","müsli","cereal","jauhot","flour","sugar","sokeri","suola","salt"],
-    "🧴 Juomat":                ["drink","juice","mehu","vesi","water","kalja","beer","viini","wine","kahvi","coffee","tee","tea","smoothie","limonadi","soda","kaura","oat milk","soijajuoma","soy milk"],
-    "🍫 Makeiset & snacksit":   ["chocolate","suklaa","candy","makeinen","snack","sipsit","chips","karkki","jäätelö","ice cream","popcorn","bar","patukat"],
-    "🧊 Pakasteet":             ["frozen","pakaste","pakastettu"],
-    "🧹 Muut":                  []
+FINELI_DB = {
+    "maito kevyt":          {"kcal":37, "proteiini":3.4,"rasva":0.5,"hh":4.7,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":21},
+    "maito täysmaito":      {"kcal":61, "proteiini":3.2,"rasva":3.5,"hh":4.7,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":22},
+    "maito rasvaton":       {"kcal":32, "proteiini":3.3,"rasva":0.1,"hh":4.8,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":23},
+    "kauramaito":           {"kcal":44, "proteiini":1.0,"rasva":1.5,"hh":6.5,"kuitu":0.8,"suola":0.1,"ryhmä":"Kasvipohjaiset","fineli_id":5602},
+    "soijamaito":           {"kcal":39, "proteiini":3.3,"rasva":1.8,"hh":2.5,"kuitu":0.4,"suola":0.1,"ryhmä":"Kasvipohjaiset","fineli_id":5601},
+    "jogurtti maustamaton": {"kcal":59, "proteiini":3.9,"rasva":3.1,"hh":4.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":130},
+    "kaurajogurtti":        {"kcal":57, "proteiini":2.5,"rasva":1.2,"hh":9.5,"kuitu":1.0,"suola":0.1,"ryhmä":"Kasvipohjaiset","fineli_id":5612},
+    "kermaviili":           {"kcal":118,"proteiini":3.0,"rasva":10.0,"hh":3.5,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":143},
+    "raejuusto":            {"kcal":72, "proteiini":12.4,"rasva":2.0,"hh":2.2,"kuitu":0.0,"suola":0.4,"ryhmä":"Maitotalous","fineli_id":177},
+    "emmental":             {"kcal":370,"proteiini":28.0,"rasva":29.0,"hh":0.5,"kuitu":0.0,"suola":1.0,"ryhmä":"Juustot","fineli_id":160},
+    "edam":                 {"kcal":326,"proteiini":25.0,"rasva":24.0,"hh":0.5,"kuitu":0.0,"suola":1.5,"ryhmä":"Juustot","fineli_id":161},
+    "kananmuna":            {"kcal":143,"proteiini":12.6,"rasva":10.0,"hh":0.8,"kuitu":0.0,"suola":0.4,"ryhmä":"Munat","fineli_id":9},
+    "voi":                  {"kcal":717,"proteiini":0.8,"rasva":80.0,"hh":0.0,"kuitu":0.0,"suola":1.2,"ryhmä":"Rasvat","fineli_id":63},
+    "margariini":           {"kcal":517,"proteiini":0.2,"rasva":58.0,"hh":0.5,"kuitu":0.0,"suola":0.6,"ryhmä":"Rasvat","fineli_id":68},
+    "naudan jauheliha":     {"kcal":243,"proteiini":17.0,"rasva":19.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Liha","fineli_id":397},
+    "sian jauheliha":       {"kcal":214,"proteiini":17.0,"rasva":16.0,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Liha","fineli_id":398},
+    "broilerin rintafilee": {"kcal":110,"proteiini":23.5,"rasva":1.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Siipikarja","fineli_id":427},
+    "kalkkunan rintafilee": {"kcal":104,"proteiini":22.0,"rasva":1.2,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Siipikarja","fineli_id":437},
+    "lohi":                 {"kcal":208,"proteiini":19.0,"rasva":14.0,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Kala","fineli_id":508},
+    "silakka":              {"kcal":126,"proteiini":18.0,"rasva":6.0, "hh":0.0,"kuitu":0.0,"suola":0.2,"ryhmä":"Kala","fineli_id":503},
+    "muikku":               {"kcal":88, "proteiini":18.0,"rasva":1.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Kala","fineli_id":507},
+    "tonnikala säilyke":    {"kcal":116,"proteiini":25.5,"rasva":1.0,"hh":0.0,"kuitu":0.0,"suola":0.5,"ryhmä":"Kala","fineli_id":517},
+    "nakkimakkara":         {"kcal":290,"proteiini":12.0,"rasva":26.0,"hh":3.0,"kuitu":0.0,"suola":1.8,"ryhmä":"Lihavalmisteet","fineli_id":461},
+    "porkkana":             {"kcal":35, "proteiini":0.9,"rasva":0.2,"hh":7.5,"kuitu":2.4,"suola":0.1,"ryhmä":"Juurekset","fineli_id":234},
+    "peruna":               {"kcal":72, "proteiini":1.9,"rasva":0.1,"hh":16.0,"kuitu":1.3,"suola":0.0,"ryhmä":"Juurekset","fineli_id":223},
+    "lanttu":               {"kcal":26, "proteiini":1.2,"rasva":0.1,"hh":4.8,"kuitu":2.3,"suola":0.0,"ryhmä":"Juurekset","fineli_id":248},
+    "punajuuri":            {"kcal":38, "proteiini":1.8,"rasva":0.1,"hh":7.0,"kuitu":2.4,"suola":0.1,"ryhmä":"Juurekset","fineli_id":246},
+    "tomaatti":             {"kcal":18, "proteiini":0.9,"rasva":0.2,"hh":2.8,"kuitu":1.2,"suola":0.0,"ryhmä":"Hedelmävihannekset","fineli_id":280},
+    "kurkku":               {"kcal":14, "proteiini":0.6,"rasva":0.1,"hh":2.2,"kuitu":0.6,"suola":0.0,"ryhmä":"Hedelmävihannekset","fineli_id":278},
+    "paprika":              {"kcal":28, "proteiini":0.9,"rasva":0.2,"hh":5.0,"kuitu":1.7,"suola":0.0,"ryhmä":"Hedelmävihannekset","fineli_id":285},
+    "pinaatti":             {"kcal":20, "proteiini":2.2,"rasva":0.4,"hh":1.5,"kuitu":2.2,"suola":0.1,"ryhmä":"Lehtivihannekset","fineli_id":296},
+    "parsakaali":           {"kcal":25, "proteiini":3.0,"rasva":0.3,"hh":2.3,"kuitu":3.0,"suola":0.0,"ryhmä":"Kasvikset","fineli_id":256},
+    "kaali":                {"kcal":24, "proteiini":1.3,"rasva":0.2,"hh":4.0,"kuitu":2.0,"suola":0.0,"ryhmä":"Kasvikset","fineli_id":255},
+    "sipuli":               {"kcal":36, "proteiini":1.1,"rasva":0.1,"hh":7.5,"kuitu":1.5,"suola":0.0,"ryhmä":"Juurekset","fineli_id":241},
+    "valkosipuli":          {"kcal":111,"proteiini":5.0,"rasva":0.2,"hh":22.0,"kuitu":2.1,"suola":0.0,"ryhmä":"Maustekasvit","fineli_id":242},
+    "mansikka":             {"kcal":29, "proteiini":0.8,"rasva":0.3,"hh":5.3,"kuitu":2.0,"suola":0.0,"ryhmä":"Marjat","fineli_id":323},
+    "mustikka":             {"kcal":37, "proteiini":0.5,"rasva":0.5,"hh":7.2,"kuitu":2.7,"suola":0.0,"ryhmä":"Marjat","fineli_id":328},
+    "puolukka":             {"kcal":37, "proteiini":0.5,"rasva":0.5,"hh":7.1,"kuitu":3.8,"suola":0.0,"ryhmä":"Marjat","fineli_id":331},
+    "omena":                {"kcal":50, "proteiini":0.3,"rasva":0.2,"hh":11.5,"kuitu":2.0,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":309},
+    "banaani":              {"kcal":89, "proteiini":1.1,"rasva":0.3,"hh":20.5,"kuitu":2.6,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":305},
+    "appelsiini":           {"kcal":43, "proteiini":0.9,"rasva":0.2,"hh":8.8,"kuitu":2.0,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":312},
+    "avokado":              {"kcal":160,"proteiini":2.0,"rasva":15.0,"hh":2.0,"kuitu":6.7,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":304},
+    "ruisleipä":            {"kcal":216,"proteiini":6.8,"rasva":1.8,"hh":43.0,"kuitu":9.3,"suola":1.1,"ryhmä":"Leivät","fineli_id":707},
+    "vehnäleipä":           {"kcal":240,"proteiini":8.0,"rasva":2.0,"hh":47.0,"kuitu":2.8,"suola":1.2,"ryhmä":"Leivät","fineli_id":700},
+    "kaura hiutale":        {"kcal":368,"proteiini":12.5,"rasva":7.0,"hh":61.0,"kuitu":9.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":742},
+    "pasta":                {"kcal":356,"proteiini":13.0,"rasva":1.5,"hh":71.0,"kuitu":3.5,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":770},
+    "riisi valkoinen":      {"kcal":356,"proteiini":7.0,"rasva":0.5,"hh":79.0,"kuitu":0.6,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":762},
+    "riisi täysjyvä":       {"kcal":349,"proteiini":7.5,"rasva":2.5,"hh":73.0,"kuitu":3.5,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":763},
+    "linssit kuiva":        {"kcal":299,"proteiini":23.0,"rasva":1.4,"hh":48.0,"kuitu":12.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":659},
+    "kikherneet":           {"kcal":364,"proteiini":19.0,"rasva":6.0,"hh":61.0,"kuitu":17.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":657},
+    "härkäpapu kuiva":      {"kcal":308,"proteiini":25.0,"rasva":1.5,"hh":48.0,"kuitu":8.5,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":653},
+    "sokeriherne":          {"kcal":81, "proteiini":5.4,"rasva":0.4,"hh":14.0,"kuitu":5.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":663},
+    "rypsiöljy":            {"kcal":828,"proteiini":0.0,"rasva":92.0,"hh":0.0,"kuitu":0.0,"suola":0.0,"ryhmä":"Rasvat","fineli_id":71},
+    "oliiviöljy":           {"kcal":824,"proteiini":0.0,"rasva":91.0,"hh":0.0,"kuitu":0.0,"suola":0.0,"ryhmä":"Rasvat","fineli_id":74},
+    "auringonkukansiemen":  {"kcal":584,"proteiini":20.0,"rasva":52.0,"hh":11.0,"kuitu":9.0,"suola":0.0,"ryhmä":"Siemenet","fineli_id":840},
+    "pellavasiemen":        {"kcal":534,"proteiini":18.0,"rasva":42.0,"hh":18.0,"kuitu":28.0,"suola":0.0,"ryhmä":"Siemenet","fineli_id":842},
+    "manteli":              {"kcal":575,"proteiini":21.0,"rasva":50.0,"hh":13.0,"kuitu":12.0,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":826},
+    "cashewpähkinä":        {"kcal":574,"proteiini":15.0,"rasva":46.0,"hh":30.0,"kuitu":3.3,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":822},
+    "tofu":                 {"kcal":76, "proteiini":8.0,"rasva":4.5,"hh":0.5,"kuitu":0.3,"suola":0.0,"ryhmä":"Kasviproteiinit","fineli_id":675},
+    "nyhtökaura":           {"kcal":155,"proteiini":20.0,"rasva":4.5,"hh":8.5,"kuitu":5.0,"suola":0.3,"ryhmä":"Kasviproteiinit","fineli_id":5620},
+    "härkis":               {"kcal":138,"proteiini":19.0,"rasva":3.5,"hh":7.5,"kuitu":5.5,"suola":0.4,"ryhmä":"Kasviproteiinit","fineli_id":5621},
 }
 
-def guess_department(product: dict) -> str:
-    """Arvaa tuotteen kauppaosasto kategoriatägien ja nimen perusteella."""
-    name = (product.get("product_name","") + " " + " ".join(product.get("categories_tags",[])) + " " + product.get("brands","")).lower()
-    for dept, keywords in DEPARTMENT_KEYWORDS.items():
-        if any(k in name for k in keywords):
-            return dept
-    return "🧹 Muut"
+def fineli_search(query: str) -> list:
+    q = query.lower().strip()
+    results = []
+    for name, data in FINELI_DB.items():
+        if q == name:
+            results.insert(0, {"name": name, **data, "_score": 3})
+        elif name.startswith(q):
+            results.append({"name": name, **data, "_score": 2})
+        elif q in name or any(q in word for word in name.split()):
+            results.append({"name": name, **data, "_score": 1})
+    results.sort(key=lambda x: -x["_score"])
+    return results[:5]
 
-# ── SESONKITUOTTEET ───────────────────────────────────────────────────────────
-def get_season_products() -> dict:
-    """Palauttaa kuukauden mukaan suomalaiset sesonkituotteet."""
-    month = datetime.now().month
-    seasons = {
-        (12,1,2): {
-            "name": "🌨️ Talvi",
-            "tip": "Kausi kotimaiselle juureksille, punajuurelle ja talvisäilyköille.",
-            "products": [
-                {"name":"Lanttu","reason":"Suomalainen talviklassikko – Eco A, kasvaa Suomessa","search":"lanttu"},
-                {"name":"Punajuuri","reason":"Edullinen, kasvaa Suomessa ympäri vuoden","search":"punajuuri"},
-                {"name":"Kaali","reason":"Kotimainen, hyvä Eco-Score, paljon C-vitamiinia","search":"kaali"},
-                {"name":"Juuripersilja","reason":"Talven supervihannes, kotimaisena kevyt hiilijalanjälki","search":"juuripersilja"},
-                {"name":"Hapankaali","reason":"Fermentoitu – pitkä säilyvyys, vähän hävikkiä","search":"hapankaali"},
-                {"name":"Silakoita","reason":"Kotimainen kala, pienin hiilijalanjälki kalalajeista","search":"silakka"},
-            ]
-        },
-        (3,4,5): {
-            "name": "🌱 Kevät",
-            "tip": "Kevään ensimmäiset vihannekset ja kotimaiset yrtit kasvavat.",
-            "products": [
-                {"name":"Pinaatti","reason":"Ensimmäinen kotimainen lehtivihannes keväällä","search":"pinaatti"},
-                {"name":"Nokkonen","reason":"Ilmainen ja erittäin ravinteikasta – Eco A","search":"nokkonen"},
-                {"name":"Raparperi","reason":"Kotimainen kevätklassikko, C-vitamiinia","search":"raparperi"},
-                {"name":"Retiisi","reason":"Nopein kotimainen kesävihannes","search":"retiisi"},
-                {"name":"Vihreä sipuli","reason":"Kasvaa Suomessa, pienin jalanjälki","search":"vihreä sipuli"},
-                {"name":"Silakka","reason":"Parhaassa iskussa keväällä, kotimainen kala","search":"silakka"},
-            ]
-        },
-        (6,7,8): {
-            "name": "☀️ Kesä",
-            "tip": "Suomalaisten sesonki! Mansikat, mustaherukat ja uudet perunat huipussaan.",
-            "products": [
-                {"name":"Mansikka","reason":"Suomen mansikka – lyhyt matka, pieni jalanjälki","search":"mansikka"},
-                {"name":"Mustikka","reason":"Luonnonmarjana erittäin pieni Eco-Score","search":"mustikka"},
-                {"name":"Uusi peruna","reason":"Kotimainen kesäperuna – parempi kuin tuontiperuna","search":"uusi peruna"},
-                {"name":"Kurkku","reason":"Kasvihuonekurkku Suomesta kesällä parhaimmillaan","search":"kurkku"},
-                {"name":"Tomaatti","reason":"Kotimainen parempi kuin tuotu talvella","search":"tomaatti"},
-                {"name":"Kesäkurpitsa","reason":"Nopeakasvuinen, erittäin pieni jalanjälki","search":"kesäkurpitsa"},
-            ]
-        },
-        (9,10,11): {
-            "name": "🍂 Syksy",
-            "tip": "Sadonkorjuuaika – juurekset, sienet ja omenat parhaimmillaan.",
-            "products": [
-                {"name":"Omena","reason":"Kotimainen omena parhaimmillaan syksyllä","search":"omena"},
-                {"name":"Sienet","reason":"Metsäsienet ilmaiseksi tai pienellä jalanjäljellä","search":"sieni"},
-                {"name":"Kurpitsa","reason":"Sadonkorjuuajan klassikko, monipuolinen","search":"kurpitsa"},
-                {"name":"Porkkana","reason":"Kotimainen, edullinen, Eco A","search":"porkkana"},
-                {"name":"Puolukka","reason":"Suomalainen metsämarja – Eco A, pitkä säilyvyys","search":"puolukka"},
-                {"name":"Kaalikeitto","reason":"Syksyn perinteisin suomalainen ruoka","search":"kaali"},
-            ]
-        },
-    }
-    for months, data in seasons.items():
-        if month in months:
-            return data
-    return seasons[(6,7,8)]
+def fineli_enrich(product: dict) -> dict | None:
+    name = (product.get("product_name") or "").lower()
+    best = None
+    best_score = 0
+    for fin_name, fin_data in FINELI_DB.items():
+        score = sum(1 for w in fin_name.split() if w in name)
+        if score > best_score:
+            best_score = score
+            best = {"name": fin_name, **fin_data}
+    return best if best_score > 0 else None
 
-# ── OSTOHISTORIA ─────────────────────────────────────────────────────────────
-HISTORY_FILE = "ostohistoria.json"
-
-def load_history() -> list:
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE,"r",encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-def save_to_history(product: dict, price: float = 0.0):
-    history = load_history()
-    entry = {
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "name": product.get("product_name","Tuntematon"),
-        "brand": product.get("brands",""),
-        "eco": str(product.get("ecoscore_grade","?")).upper(),
-        "nutri": str(product.get("nutrition_grades","?")).upper(),
-        "nova": product.get("nova_group"),
-        "carbon": product.get("carbon_footprint_from_known_ingredients_100g"),
-        "price": price,
-    }
-    history.append(entry)
-    with open(HISTORY_FILE,"w",encoding="utf-8") as f:
-        json.dump(history[-200:], f, ensure_ascii=False)  # max 200 merkintää
-
-# ── KASVISVAIHTOEHTO-TUNNISTUS ────────────────────────────────────────────────
-MEAT_TO_PLANT = {
-    "jauheliha":  {"alt":"Härkäpapu- tai soijarouhe","tip":"Sama rakenne, 80% pienempi hiilijalanjälki","search":"härkäpapu rouhe"},
-    "nauta":      {"alt":"Linssit tai herneet","tip":"Proteiinia yhtä paljon, murto-osa päästöistä","search":"linssit"},
-    "sianliha":   {"alt":"Tofu tai seitan","tip":"Hyvä proteiinilähde, huomattavasti ekologisempi","search":"tofu"},
-    "kana":       {"alt":"Kananpapu tai kikherne","tip":"Sama proteiini, kasviproteiini on ekologisempaa","search":"kikherne"},
-    "broiler":    {"alt":"Nyhtökaura tai härkäpapu","tip":"Kotimaiset kasvivaihtoehdot kanalle","search":"nyhtökaura"},
-    "makkara":    {"alt":"Kasvisgrillimakkara","tip":"Kasvismakkara maistuu samalta, vähemmän prosessoitu","search":"kasvisgrillimakkara"},
-    "lohi":       {"alt":"Silakka tai muikku","tip":"Kotimainen kala – pienempi jalanjälki kuin lohi","search":"silakka"},
-    "maito":      {"alt":"Kauramaito","tip":"Kotimainen kauramaito – 80% pienempi jalanjälki","search":"kauramaito"},
-    "jogurtti":   {"alt":"Kaurajogurtti","tip":"Kasvipohjainen jogurtti, sama rakenne","search":"kaurajogurtti"},
-    "juusto":     {"alt":"Kasvisjuusto tai nutritional yeast","tip":"Juustoa käytetään pieninä määrinä – harkitse vaihtoehtoa","search":"kasvisjuusto"},
-}
-
-def get_plant_alternative(product: dict) -> dict | None:
-    """Tarkistaa onko tuotteelle kasvispohjainen vaihtoehto."""
-    name = product.get("product_name","").lower()
-    cats = " ".join(product.get("categories_tags",[])).lower()
-    combined = name + " " + cats
-    for keyword, alt_data in MEAT_TO_PLANT.items():
-        if keyword in combined:
-            return alt_data
-    return None
+def show_fineli_card(fin_data: dict):
+    ryhmä = fin_data.get("ryhmä","")
+    fin_name = fin_data.get("name","").title()
+    fineli_id = fin_data.get("fineli_id","")
+    st.markdown(f"""
+<div style='background:#f0fff4;border:1.5px solid #1a5c2a;border-radius:10px;padding:16px 20px;margin:8px 0'>
+<div style='display:flex;align-items:center;gap:8px;margin-bottom:12px'>
+  <span style='font-size:1.3em'>🇫🇮</span>
+  <b style='color:#0d3b18;font-size:1.05em'>Fineli-ravintotieto (THL)</b>
+  <span style='background:#d4edda;color:#1a5c2a;border-radius:4px;padding:2px 8px;font-size:0.8em;margin-left:4px'>{ryhmä}</span>
+</div>
+""", unsafe_allow_html=True)
+    cols = st.columns(6)
+    nutrients = [
+        ("🔥 Energia", f"{fin_data.get('kcal',0):.0f} kcal"),
+        ("💪 Proteiini", f"{fin_data.get('proteiini',0):.1f} g"),
+        ("🫙 Rasva", f"{fin_data.get('rasva',0):.1f} g"),
+        ("🍞 Hiilihydr.", f"{fin_data.get('hh',0):.1f} g"),
+        ("🌾 Kuitu", f"{fin_data.get('kuitu',0):.1f} g"),
+        ("🧂 Suola", f"{fin_data.get('suola',0):.2f} g"),
+    ]
+    for col, (label, value) in zip(cols, nutrients):
+        with col:
+            st.markdown(f"""
+<div style='text-align:center;background:white;border-radius:8px;padding:8px 4px;border:1px solid #d4edda'>
+<div style='font-size:0.72em;color:#4a8c5c;margin-bottom:2px'>{label}</div>
+<div style='font-size:1.05em;font-weight:700;color:#0d3b18'>{value}</div>
+</div>""", unsafe_allow_html=True)
+    url = f"https://fineli.fi/fineli/fi/elintarvikkeet/{fineli_id}"
+    st.markdown(f"""<div style='margin-top:10px;font-size:0.8em;color:#555'>
+Lähde: <a href='{url}' target='_blank' style='color:#1a5c2a;font-weight:600'>Fineli® THL – {fin_name}</a>
+<span style='color:#888'> · Arvot per 100 g</span></div></div>""", unsafe_allow_html=True)
 
 
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
@@ -458,6 +451,13 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.markdown(f"<small>{nova_text(nova)}</small>", unsafe_allow_html=True)
 
     st.markdown("---")
+
+    # Fineli-täydennys
+    fin = fineli_enrich(product)
+    if fin:
+        st.markdown("---")
+        st.markdown("### 🍽️ Ravintosisältö (Fineli)")
+        show_fineli_card(fin)
 
     # Hiilijalanjälki
     st.markdown("### 🌍 Hiilijalanjälki")
@@ -593,9 +593,8 @@ with st.sidebar:
         "📷 Viivakoodihaku",
         "🛒 Ostoslista",
         "🗑️ Hävikinseuranta",
-        "🌱 Sesonkituotteet",
-        "📊 Ostohistoria",
         "📈 Tilastot",
+        "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
     st.markdown("---")
