@@ -38,9 +38,33 @@ st.markdown("""
   }
   .stButton > button:hover { background-color: #0d3b18 !important; }
 
-  /* Input-kentät */
-  .stTextInput > div > div > input { border: 2px solid #1a5c2a !important; border-radius: 6px !important; }
-  .stNumberInput > div > div > input { border: 2px solid #1a5c2a !important; border-radius: 6px !important; }
+  /* Input-kentät – valkoinen tausta, tumma teksti, vihreä reuna */
+  .stTextInput > div > div > input {
+      border: 2px solid #1a5c2a !important;
+      border-radius: 6px !important;
+      background-color: #ffffff !important;
+      color: #1a5c2a !important;
+  }
+  .stTextInput > div > div > input::placeholder { color: #aaa !important; }
+  .stNumberInput > div > div > input {
+      border: 2px solid #1a5c2a !important;
+      border-radius: 6px !important;
+      background-color: #ffffff !important;
+      color: #1a5c2a !important;
+  }
+  .stSelectbox > div > div {
+      background-color: #ffffff !important;
+      color: #1a5c2a !important;
+      border: 2px solid #1a5c2a !important;
+      border-radius: 6px !important;
+  }
+  .stSelectbox > div > div > div { color: #1a5c2a !important; }
+  .stTextArea > div > div > textarea {
+      background-color: #ffffff !important;
+      color: #1a5c2a !important;
+      border: 2px solid #1a5c2a !important;
+      border-radius: 6px !important;
+  }
 
   /* Metriikkaboxes */
   [data-testid="metric-container"] {
@@ -101,45 +125,72 @@ for key, file in [("history", HISTORY_FILE), ("shopping", SHOPPING_FILE), ("wast
         st.session_state[key] = load_json(file)
 
 # ── OPEN FOOD FACTS API ───────────────────────────────────────────────────────
-OFF = "https://world.openfoodfacts.org"
-FINLAND_TAG = "en:finland"
-FIELDS = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,categories_tags_en,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text,image_front_url"
+import time
 
+OFF = "https://world.openfoodfacts.org"
+FIELDS = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,categories_tags_en,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text,image_front_url"
+HEADERS = {"User-Agent": "KauppaNavigaattori/2.0 (educational project)"}
+
+def _get_with_retry(url: str, params: dict, retries: int = 3, timeout: int = 12) -> dict | None:
+    """HTTP GET with automatic retry and exponential backoff."""
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, params=params, timeout=timeout, headers=HEADERS)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 429:  # rate limited
+                time.sleep(2 ** attempt)
+        except requests.exceptions.Timeout:
+            if attempt < retries - 1:
+                time.sleep(1.5 ** attempt)
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(1)
+    return None
+
+@st.cache_data(ttl=600, show_spinner=False)
 def search_products(query: str, finland_only: bool = True) -> list:
+    """Search with cache (10 min) + automatic fallback if Finland filter yields nothing."""
     params = {
         "search_terms": query,
         "search_simple": 1,
         "action": "process",
         "json": 1,
-        "page_size": 15,
+        "page_size": 20,
         "fields": FIELDS
     }
     if finland_only:
         params.update({"tagtype_0": "countries", "tag_contains_0": "contains", "tag_0": "finland"})
-    try:
-        r = requests.get(f"{OFF}/cgi/search.pl", params=params, timeout=10,
-                         headers={"User-Agent": "KauppaNavigaattori/2.0"})
-        return r.json().get("products", [])
-    except Exception:
-        return []
 
+    data = _get_with_retry(f"{OFF}/cgi/search.pl", params)
+    results = (data or {}).get("products", [])
+
+    # Auto-fallback: jos Suomi-filtteri ei tuota riittävästi tuloksia, hae globaalisti
+    if finland_only and len(results) < 3:
+        params_global = {k: v for k, v in params.items()
+                         if k not in ("tagtype_0", "tag_contains_0", "tag_0")}
+        data2 = _get_with_retry(f"{OFF}/cgi/search.pl", params_global)
+        results = (data2 or {}).get("products", []) or results
+
+    return [p for p in results if p.get("product_name")]  # poistetaan tyhjät
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_by_barcode(barcode: str) -> dict | None:
-    try:
-        r = requests.get(f"{OFF}/api/v2/product/{barcode}.json",
-                         params={"fields": FIELDS}, timeout=10,
-                         headers={"User-Agent": "KauppaNavigaattori/2.0"})
-        data = r.json()
-        if data.get("status") == 1:
-            return data["product"]
-    except Exception:
-        pass
+    """Barcode lookup with 1h cache."""
+    data = _get_with_retry(
+        f"{OFF}/api/v2/product/{barcode}.json",
+        {"fields": FIELDS}
+    )
+    if data and data.get("status") == 1:
+        return data["product"]
     return None
 
-def find_alternatives(product: dict) -> list:
-    cats = product.get("categories_tags", [])
-    if not cats:
+@st.cache_data(ttl=600, show_spinner=False)
+def find_alternatives(categories_str: str, own_code: str) -> list:
+    """Find eco-A alternatives; cached by category string."""
+    if not categories_str:
         return []
-    best_cat = cats[-1].replace("en:", "").replace("fi:", "")
+    best_cat = categories_str.split(",")[-1].strip().replace("en:", "").replace("fi:", "")
     params = {
         "action": "process",
         "tagtype_0": "categories",
@@ -149,17 +200,12 @@ def find_alternatives(product: dict) -> list:
         "tag_contains_1": "contains",
         "tag_1": "a",
         "json": 1,
-        "page_size": 6,
+        "page_size": 8,
         "fields": FIELDS
     }
-    try:
-        r = requests.get(f"{OFF}/cgi/search.pl", params=params, timeout=10,
-                         headers={"User-Agent": "KauppaNavigaattori/2.0"})
-        results = r.json().get("products", [])
-        own_code = product.get("code", "")
-        return [p for p in results if p.get("code") != own_code][:4]
-    except Exception:
-        return []
+    data = _get_with_retry(f"{OFF}/cgi/search.pl", params)
+    results = (data or {}).get("products", [])
+    return [p for p in results if p.get("code") != own_code and p.get("product_name")][:4]
 
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
@@ -329,7 +375,8 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.markdown("### 💡 Kestävämpiä vaihtoehtoja samasta kategoriasta")
         st.caption("Nämä tuotteet ovat samasta tuoteryhmästä ja niillä on parempi Eco-Score A:")
         with st.spinner("Etsitään vaihtoehtoja..."):
-            alts = find_alternatives(product)
+            cats_str = ",".join(product.get("categories_tags", []))
+            alts = find_alternatives(cats_str, product.get("code", ""))
         if alts:
             alt_cols = st.columns(min(len(alts), 4))
             for i, alt in enumerate(alts[:4]):
@@ -432,7 +479,7 @@ if "Hae" in page:
     sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
 
     if q:
-        with st.spinner("Haetaan..."):
+        with st.spinner("Haetaan tuotteita... (ensimmäinen haku voi kestää hetken)"):
             products = search_products(q, finland_only)
 
         if not products and finland_only:
