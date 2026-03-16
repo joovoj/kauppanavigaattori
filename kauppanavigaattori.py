@@ -866,6 +866,55 @@ elif "Tilastot" in page:
         else:
             st.info("💡 Pienilläkin muutoksilla voit parantaa ympäristövaikutustasi. Kokeile etsiä A/B-vaihtoehtoja!")
 
+# ── 7. FINELI-RAVINTOHAKU ─────────────────────────────────────────────────────
+elif "Fineli" in page:
+    st.title("🇫🇮 Fineli-ravintohaku")
+    st.markdown("Hae suomalaisia elintarvikkeita **THL:n Fineli-tietokannasta** – tarkat ravintosisältötiedot välittömästi.")
+
+    st.info("💡 Fineli-data täydentää automaattisesti myös tuotteiden tietosivut – kun haet esim. lohta Open Food Factsista, Fineli-ravintotiedot ilmestyvät tuotesivulle automaattisesti.")
+
+    fin_q = st.text_input("🔍 Hae elintarviketta", placeholder="esim. lohi, kauramaito, ruisleipä, härkis, peruna...")
+
+    if fin_q:
+        hits = fineli_search(fin_q)
+        if hits:
+            st.success(f"Löytyi {len(hits)} osumaa")
+            for hit in hits:
+                with st.expander(f"🥦 **{hit['name'].title()}** – {hit['kcal']} kcal / 100 g · {hit.get('ryhmä','')}"):
+                    show_fineli_card(hit)
+        else:
+            st.warning("Ei osumia. Kokeile lyhyempää hakusanaa – esim. 'lohi', 'maito', 'pasta', 'peruna'")
+
+    st.markdown("---")
+    st.markdown("### 📋 Kaikki tuotteet tietokannassa")
+
+    ryhmät = sorted(set(v["ryhmä"] for v in FINELI_DB.values()))
+    selected = st.selectbox("Suodata elintarvikeryhmän mukaan", ["Kaikki ryhmät"] + ryhmät)
+
+    rows = []
+    for name, d in FINELI_DB.items():
+        if selected == "Kaikki ryhmät" or d["ryhmä"] == selected:
+            rows.append({
+                "Tuote": name.title(),
+                "Ryhmä": d["ryhmä"],
+                "Energia (kcal)": d["kcal"],
+                "Proteiini (g)": d["proteiini"],
+                "Rasva (g)": d["rasva"],
+                "Hiilihydr. (g)": d["hh"],
+                "Kuitu (g)": d["kuitu"],
+                "Suola (g)": d["suola"],
+            })
+
+    if rows:
+        df_fin = pd.DataFrame(rows).sort_values("Tuote").reset_index(drop=True)
+        st.dataframe(df_fin, use_container_width=True, hide_index=True)
+        st.caption(f"Yhteensä {len(rows)} elintarviketta · Lähde: Fineli® THL · Kaikki arvot per 100 g")
+
+    st.markdown("---")
+    st.markdown("### 🔗 Fineli-tietokanta verkossa")
+    st.markdown("Haluatko nähdä täydellisen Fineli-tietokannan? THL ylläpitää yli 4000 elintarvikkeen tietokantaa:")
+    st.link_button("🌐 Avaa Fineli.fi (THL)", "https://fineli.fi/fineli/fi/index")
+
 # ── 6. TIETOA PISTEYTYKSISTÄ ──────────────────────────────────────────────────
 elif "Tietoa" in page:
     st.title("ℹ️ Mitä pisteet tarkoittavat?")
