@@ -230,6 +230,140 @@ def get_recipe_links(product_name: str, categories: list) -> list:
         links.append({"site": "🐟 Kalareseptit", "url": f"https://www.kotikokki.net/reseptit/haku/?search={term}+kala", "desc": "Kalareseptit"})
     return links
 
+
+# ── TUOTEOSASTO-TUNNISTUS ─────────────────────────────────────────────────────
+DEPARTMENT_KEYWORDS = {
+    "🥛 Maitotuotteet & munat": ["milk","dairy","maito","jogurt","yogurt","juusto","cheese","kerma","cream","voi","butter","kananmuna","egg","quark","viili","piimä"],
+    "🥩 Liha & kala":           ["meat","liha","beef","pork","chicken","kana","sika","nauta","lohi","salmon","fish","kala","silli","tonnikala","tuna","makkara","sausage","broiler"],
+    "🥦 Kasvikset & hedelmät":  ["vegetable","fruit","kasvis","hedelmä","vihannes","tomaatti","tomato","kurkku","salaatti","salad","omena","apple","banaani","banana","porkkana","carrot","peruna","potato","paprika","sipuli","onion","mango","appelsiini"],
+    "🍞 Leipä & leivonnaiset":  ["bread","leipä","ruisleipä","pulla","bun","cake","kakku","keksi","cookie","cracker","muffin","bagel","wrap","tortilla","rye"],
+    "🥫 Säilykkeet & kuivatuotteet": ["pasta","rice","riisi","noodle","can","säilyke","legume","papu","linssi","lentil","chickpea","herne","oat","kaura","müsli","cereal","jauhot","flour","sugar","sokeri","suola","salt"],
+    "🧴 Juomat":                ["drink","juice","mehu","vesi","water","kalja","beer","viini","wine","kahvi","coffee","tee","tea","smoothie","limonadi","soda","kaura","oat milk","soijajuoma","soy milk"],
+    "🍫 Makeiset & snacksit":   ["chocolate","suklaa","candy","makeinen","snack","sipsit","chips","karkki","jäätelö","ice cream","popcorn","bar","patukat"],
+    "🧊 Pakasteet":             ["frozen","pakaste","pakastettu"],
+    "🧹 Muut":                  []
+}
+
+def guess_department(product: dict) -> str:
+    """Arvaa tuotteen kauppaosasto kategoriatägien ja nimen perusteella."""
+    name = (product.get("product_name","") + " " + " ".join(product.get("categories_tags",[])) + " " + product.get("brands","")).lower()
+    for dept, keywords in DEPARTMENT_KEYWORDS.items():
+        if any(k in name for k in keywords):
+            return dept
+    return "🧹 Muut"
+
+# ── SESONKITUOTTEET ───────────────────────────────────────────────────────────
+def get_season_products() -> dict:
+    """Palauttaa kuukauden mukaan suomalaiset sesonkituotteet."""
+    month = datetime.now().month
+    seasons = {
+        (12,1,2): {
+            "name": "🌨️ Talvi",
+            "tip": "Kausi kotimaiselle juureksille, punajuurelle ja talvisäilyköille.",
+            "products": [
+                {"name":"Lanttu","reason":"Suomalainen talviklassikko – Eco A, kasvaa Suomessa","search":"lanttu"},
+                {"name":"Punajuuri","reason":"Edullinen, kasvaa Suomessa ympäri vuoden","search":"punajuuri"},
+                {"name":"Kaali","reason":"Kotimainen, hyvä Eco-Score, paljon C-vitamiinia","search":"kaali"},
+                {"name":"Juuripersilja","reason":"Talven supervihannes, kotimaisena kevyt hiilijalanjälki","search":"juuripersilja"},
+                {"name":"Hapankaali","reason":"Fermentoitu – pitkä säilyvyys, vähän hävikkiä","search":"hapankaali"},
+                {"name":"Silakoita","reason":"Kotimainen kala, pienin hiilijalanjälki kalalajeista","search":"silakka"},
+            ]
+        },
+        (3,4,5): {
+            "name": "🌱 Kevät",
+            "tip": "Kevään ensimmäiset vihannekset ja kotimaiset yrtit kasvavat.",
+            "products": [
+                {"name":"Pinaatti","reason":"Ensimmäinen kotimainen lehtivihannes keväällä","search":"pinaatti"},
+                {"name":"Nokkonen","reason":"Ilmainen ja erittäin ravinteikasta – Eco A","search":"nokkonen"},
+                {"name":"Raparperi","reason":"Kotimainen kevätklassikko, C-vitamiinia","search":"raparperi"},
+                {"name":"Retiisi","reason":"Nopein kotimainen kesävihannes","search":"retiisi"},
+                {"name":"Vihreä sipuli","reason":"Kasvaa Suomessa, pienin jalanjälki","search":"vihreä sipuli"},
+                {"name":"Silakka","reason":"Parhaassa iskussa keväällä, kotimainen kala","search":"silakka"},
+            ]
+        },
+        (6,7,8): {
+            "name": "☀️ Kesä",
+            "tip": "Suomalaisten sesonki! Mansikat, mustaherukat ja uudet perunat huipussaan.",
+            "products": [
+                {"name":"Mansikka","reason":"Suomen mansikka – lyhyt matka, pieni jalanjälki","search":"mansikka"},
+                {"name":"Mustikka","reason":"Luonnonmarjana erittäin pieni Eco-Score","search":"mustikka"},
+                {"name":"Uusi peruna","reason":"Kotimainen kesäperuna – parempi kuin tuontiperuna","search":"uusi peruna"},
+                {"name":"Kurkku","reason":"Kasvihuonekurkku Suomesta kesällä parhaimmillaan","search":"kurkku"},
+                {"name":"Tomaatti","reason":"Kotimainen parempi kuin tuotu talvella","search":"tomaatti"},
+                {"name":"Kesäkurpitsa","reason":"Nopeakasvuinen, erittäin pieni jalanjälki","search":"kesäkurpitsa"},
+            ]
+        },
+        (9,10,11): {
+            "name": "🍂 Syksy",
+            "tip": "Sadonkorjuuaika – juurekset, sienet ja omenat parhaimmillaan.",
+            "products": [
+                {"name":"Omena","reason":"Kotimainen omena parhaimmillaan syksyllä","search":"omena"},
+                {"name":"Sienet","reason":"Metsäsienet ilmaiseksi tai pienellä jalanjäljellä","search":"sieni"},
+                {"name":"Kurpitsa","reason":"Sadonkorjuuajan klassikko, monipuolinen","search":"kurpitsa"},
+                {"name":"Porkkana","reason":"Kotimainen, edullinen, Eco A","search":"porkkana"},
+                {"name":"Puolukka","reason":"Suomalainen metsämarja – Eco A, pitkä säilyvyys","search":"puolukka"},
+                {"name":"Kaalikeitto","reason":"Syksyn perinteisin suomalainen ruoka","search":"kaali"},
+            ]
+        },
+    }
+    for months, data in seasons.items():
+        if month in months:
+            return data
+    return seasons[(6,7,8)]
+
+# ── OSTOHISTORIA ─────────────────────────────────────────────────────────────
+HISTORY_FILE = "ostohistoria.json"
+
+def load_history() -> list:
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE,"r",encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_to_history(product: dict, price: float = 0.0):
+    history = load_history()
+    entry = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "name": product.get("product_name","Tuntematon"),
+        "brand": product.get("brands",""),
+        "eco": str(product.get("ecoscore_grade","?")).upper(),
+        "nutri": str(product.get("nutrition_grades","?")).upper(),
+        "nova": product.get("nova_group"),
+        "carbon": product.get("carbon_footprint_from_known_ingredients_100g"),
+        "price": price,
+    }
+    history.append(entry)
+    with open(HISTORY_FILE,"w",encoding="utf-8") as f:
+        json.dump(history[-200:], f, ensure_ascii=False)  # max 200 merkintää
+
+# ── KASVISVAIHTOEHTO-TUNNISTUS ────────────────────────────────────────────────
+MEAT_TO_PLANT = {
+    "jauheliha":  {"alt":"Härkäpapu- tai soijarouhe","tip":"Sama rakenne, 80% pienempi hiilijalanjälki","search":"härkäpapu rouhe"},
+    "nauta":      {"alt":"Linssit tai herneet","tip":"Proteiinia yhtä paljon, murto-osa päästöistä","search":"linssit"},
+    "sianliha":   {"alt":"Tofu tai seitan","tip":"Hyvä proteiinilähde, huomattavasti ekologisempi","search":"tofu"},
+    "kana":       {"alt":"Kananpapu tai kikherne","tip":"Sama proteiini, kasviproteiini on ekologisempaa","search":"kikherne"},
+    "broiler":    {"alt":"Nyhtökaura tai härkäpapu","tip":"Kotimaiset kasvivaihtoehdot kanalle","search":"nyhtökaura"},
+    "makkara":    {"alt":"Kasvisgrillimakkara","tip":"Kasvismakkara maistuu samalta, vähemmän prosessoitu","search":"kasvisgrillimakkara"},
+    "lohi":       {"alt":"Silakka tai muikku","tip":"Kotimainen kala – pienempi jalanjälki kuin lohi","search":"silakka"},
+    "maito":      {"alt":"Kauramaito","tip":"Kotimainen kauramaito – 80% pienempi jalanjälki","search":"kauramaito"},
+    "jogurtti":   {"alt":"Kaurajogurtti","tip":"Kasvipohjainen jogurtti, sama rakenne","search":"kaurajogurtti"},
+    "juusto":     {"alt":"Kasvisjuusto tai nutritional yeast","tip":"Juustoa käytetään pieninä määrinä – harkitse vaihtoehtoa","search":"kasvisjuusto"},
+}
+
+def get_plant_alternative(product: dict) -> dict | None:
+    """Tarkistaa onko tuotteelle kasvispohjainen vaihtoehto."""
+    name = product.get("product_name","").lower()
+    cats = " ".join(product.get("categories_tags",[])).lower()
+    combined = name + " " + cats
+    for keyword, alt_data in MEAT_TO_PLANT.items():
+        if keyword in combined:
+            return alt_data
+    return None
+
+
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
     g = str(grade).lower()
@@ -459,6 +593,8 @@ with st.sidebar:
         "📷 Viivakoodihaku",
         "🛒 Ostoslista",
         "🗑️ Hävikinseuranta",
+        "🌱 Sesonkituotteet",
+        "📊 Ostohistoria",
         "📈 Tilastot",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
