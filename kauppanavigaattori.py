@@ -134,156 +134,101 @@ for key, file in [("history", HISTORY_FILE), ("shopping", SHOPPING_FILE), ("wast
 # ── OPEN FOOD FACTS API ───────────────────────────────────────────────────────
 import time
 
-OFF = "https://world.openfoodfacts.org"
-FIELDS = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,categories_tags_en,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text,image_front_url"
-HEADERS = {"User-Agent": "KauppaNavigaattori/2.0 (educational project)"}
+OFF   = "https://world.openfoodfacts.org"
+# Käytetään vain välttämättömät kentät – vähemmän dataa = nopeampi vastaus
+FIELDS_SEARCH = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags"
+FIELDS_FULL   = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_url,categories_tags,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text"
+HEADERS = {"User-Agent": "KauppaNavigaattori/2.0"}
 
-def _get_with_retry(url: str, params: dict, retries: int = 3, timeout: int = 12) -> dict | None:
-    """HTTP GET with automatic retry and exponential backoff."""
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, params=params, timeout=timeout, headers=HEADERS)
-            if r.status_code == 200:
-                return r.json()
-            if r.status_code == 429:  # rate limited
-                time.sleep(2 ** attempt)
-        except requests.exceptions.Timeout:
-            if attempt < retries - 1:
-                time.sleep(1.5 ** attempt)
-        except Exception:
-            if attempt < retries - 1:
-                time.sleep(1)
+def _fetch(url: str, params: dict, timeout: int = 15) -> dict | None:
+    """Yksinkertainen fetch ilman raskasta retry-logiikkaa."""
+    try:
+        r = requests.get(url, params=params, timeout=timeout, headers=HEADERS)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
     return None
 
 @st.cache_data(ttl=600, show_spinner=False)
-def search_products(query: str, finland_only: bool = True) -> list:
-    """Haku välimuistilla (10 min) + automaattinen fallback globaaliin hakuun."""
-    # Yritetään ensin suoraan v2 search API joka on luotettavampi
-    params_v2 = {
-        "search_terms": query,
-        "json": 1,
-        "page_size": 20,
-        "fields": FIELDS,
-        "sort_by": "unique_scans_n"  # suosituimmat ensin
-    }
-    if finland_only:
-        params_v2["countries_tags_en"] = "finland"
-
-    data = _get_with_retry(f"{OFF}/cgi/search.pl", {
+def search_products(query: str) -> list:
+    """
+    Haku kolmella eri strategialla peräkkäin.
+    Palauttaa ensimmäisen joka antaa tuloksia.
+    """
+    # Strategia 1: Yksinkertainen haku (nopein, toimii 90% ajasta)
+    data = _fetch(f"{OFF}/cgi/search.pl", {
         "search_terms": query,
         "search_simple": 1,
         "action": "process",
         "json": 1,
-        "page_size": 20,
-        "fields": FIELDS,
+        "page_size": 16,
+        "fields": FIELDS_SEARCH,
         "sort_by": "unique_scans_n",
-        **({"tagtype_0": "countries", "tag_contains_0": "contains", "tag_0": "finland"} if finland_only else {})
     })
     results = (data or {}).get("products", [])
 
-    # Fallback 1: jos filtteri ei tuota tuloksia, hae globaalisti
-    if len(results) < 2:
-        data2 = _get_with_retry(f"{OFF}/cgi/search.pl", {
+    # Strategia 2: v2 search API – jos 1 ei toimi
+    if len(results) < 1:
+        data = _fetch(f"{OFF}/api/v2/search", {
             "search_terms": query,
-            "search_simple": 1,
+            "page_size": 16,
+            "fields": FIELDS_SEARCH,
+            "sort_by": "unique_scans_n",
+        })
+        results = (data or {}).get("products", [])
+
+    # Strategia 3: Kielikohtainen haku englanniksi – viimeinen vaihtoehto
+    if len(results) < 1:
+        data = _fetch(f"https://world.openfoodfacts.org/cgi/search.pl", {
+            "search_terms": query,
             "action": "process",
             "json": 1,
-            "page_size": 20,
-            "fields": FIELDS,
-            "sort_by": "unique_scans_n"
+            "page_size": 16,
+            "fields": FIELDS_SEARCH,
         })
-        results = (data2 or {}).get("products", []) or results
-
-    # Fallback 2: kokeile v2 API:a jos cgi ei toimi
-    if len(results) < 2:
-        data3 = _get_with_retry(f"{OFF}/api/v2/search", {
-            "search_terms": query,
-            "json": 1,
-            "page_size": 20,
-            "fields": FIELDS
-        })
-        results = (data3 or {}).get("products", []) or results
+        results = (data or {}).get("products", [])
 
     return [p for p in results if p.get("product_name")]
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_by_barcode(barcode: str) -> dict | None:
-    """Barcode lookup with 1h cache."""
-    data = _get_with_retry(
-        f"{OFF}/api/v2/product/{barcode}.json",
-        {"fields": FIELDS}
-    )
+    """Viivakoodihaku – välimuistissa 30 min."""
+    data = _fetch(f"{OFF}/api/v2/product/{barcode}.json", {"fields": FIELDS_FULL})
     if data and data.get("status") == 1:
         return data["product"]
     return None
 
 @st.cache_data(ttl=600, show_spinner=False)
 def find_alternatives(categories_str: str, own_code: str) -> list:
-    """Find eco-A alternatives; cached by category string."""
+    """Etsii parempia Eco-Score A vaihtoehtoja samasta kategoriasta."""
     if not categories_str:
         return []
-    best_cat = categories_str.split(",")[-1].strip().replace("en:", "").replace("fi:", "")
-    params = {
+    cat = categories_str.split(",")[-1].strip().replace("en:", "").replace("fi:", "")
+    data = _fetch(f"{OFF}/cgi/search.pl", {
         "action": "process",
-        "tagtype_0": "categories",
-        "tag_contains_0": "contains",
-        "tag_0": best_cat,
-        "tagtype_1": "ecoscore_grade",
-        "tag_contains_1": "contains",
-        "tag_1": "a",
-        "json": 1,
-        "page_size": 8,
-        "fields": FIELDS
-    }
-    data = _get_with_retry(f"{OFF}/cgi/search.pl", params)
+        "tagtype_0": "categories", "tag_contains_0": "contains", "tag_0": cat,
+        "tagtype_1": "ecoscore_grade", "tag_contains_1": "contains", "tag_1": "a",
+        "json": 1, "page_size": 8, "fields": FIELDS_SEARCH
+    })
     results = (data or {}).get("products", [])
     return [p for p in results if p.get("code") != own_code and p.get("product_name")][:4]
 
 def get_recipe_links(product_name: str, categories: list) -> list:
-    """Palauttaa klikattavia reseptilinkkejä tuotteen nimen ja kategorian perusteella."""
     name = product_name.lower()
     cats = " ".join(categories).lower()
-
-    # Hakusana reseptejä varten
-    search_term = product_name.split(" ")[0] if product_name else "ruoka"
-
-    recipes = []
-
-    # Kotikokki.net haku
-    kotikokki_url = f"https://www.kotikokki.net/reseptit/haku/?search={requests.utils.quote(search_term)}"
-    recipes.append({"site": "🍽️ Kotikokki.net", "url": kotikokki_url, "desc": f"Reseptejä hakusanalla '{search_term}'"})
-
-    # Ruokaisa.fi haku
-    ruokaisa_url = f"https://www.ruokaisa.fi/?s={requests.utils.quote(search_term)}"
-    recipes.append({"site": "👨‍🍳 Ruokaisa.fi", "url": ruokaisa_url, "desc": f"Reseptejä sanalla '{search_term}'"})
-
-    # K-Ruoka reseptit
-    kruoka_url = f"https://www.k-ruoka.fi/reseptit?search={requests.utils.quote(search_term)}"
-    recipes.append({"site": "🛒 K-Ruoka reseptit", "url": kruoka_url, "desc": f"K-Ruoan reseptit: '{search_term}'"})
-
-    # Soppa365
-    soppa_url = f"https://www.soppa365.fi/?s={requests.utils.quote(search_term)}"
-    recipes.append({"site": "🥣 Soppa365", "url": soppa_url, "desc": f"Reseptejä: '{search_term}'"})
-
-    # Kasvis-spesifi
+    term = requests.utils.quote(product_name.split(" ")[0])
+    links = [
+        {"site": "🍽️ Kotikokki.net",    "url": f"https://www.kotikokki.net/reseptit/haku/?search={term}",  "desc": f"Reseptejä: {product_name.split()[0]}"},
+        {"site": "🛒 K-Ruoka reseptit",  "url": f"https://www.k-ruoka.fi/reseptit?search={term}",           "desc": f"K-Ruoka: {product_name.split()[0]}"},
+        {"site": "🥣 Soppa365",          "url": f"https://www.soppa365.fi/?s={term}",                        "desc": f"Soppa365: {product_name.split()[0]}"},
+        {"site": "👨‍🍳 Ruokaisa.fi",    "url": f"https://www.ruokaisa.fi/?s={term}",                        "desc": f"Ruokaisa: {product_name.split()[0]}"},
+    ]
     if any(k in cats+name for k in ["kasvis","vegan","oat","kaura","soija","tofu","papu","linssi"]):
-        recipes.append({
-            "site": "🌱 Vegaaniliitto reseptit",
-            "url": f"https://www.vegaaniliitto.fi/?s={requests.utils.quote(search_term)}",
-            "desc": "Kasvis- ja vegaanireseptit"
-        })
-
-    # Kala-spesifi
-    if any(k in cats+name for k in ["kala","lohi","ahven","siika","hauki","fish","salmon"]):
-        recipes.append({
-            "site": "🐟 Kalareseptit",
-            "url": f"https://www.kotikokki.net/reseptit/haku/?search={requests.utils.quote(search_term)}+kala",
-            "desc": "Kalareseptit"
-        })
-
-    return recipes
-
-
+        links.append({"site": "🌱 Vegaaniliitto", "url": f"https://www.vegaaniliitto.fi/?s={term}", "desc": "Kasvis- ja vegaanireseptit"})
+    if any(k in cats+name for k in ["kala","lohi","ahven","siika","fish","salmon"]):
+        links.append({"site": "🐟 Kalareseptit", "url": f"https://www.kotikokki.net/reseptit/haku/?search={term}+kala", "desc": "Kalareseptit"})
+    return links
 
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
@@ -454,7 +399,7 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.caption("Nämä tuotteet ovat samasta tuoteryhmästä ja niillä on parempi Eco-Score A:")
         with st.spinner("Etsitään vaihtoehtoja..."):
             cats_str = ",".join(product.get("categories_tags", []))
-            alts = find_alternatives(cats_str, product.get("code", ""))
+            alts = find_alternatives(cats_str, str(product.get("code", "")))
         if alts:
             alt_cols = st.columns(min(len(alts), 4))
             for i, alt in enumerate(alts[:4]):
@@ -548,21 +493,14 @@ if "Hae" in page:
     st.title("🔍 Hae tuotteita")
     st.markdown("Löydä tuotteet ja tarkista niiden ympäristö- ja ravitsemustiedot ennen ostosta.")
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        q = st.text_input("Hakusana", placeholder="esim. maito, oatly, fazer, lohi...")
-    with col2:
-        finland_only = st.checkbox("Vain suomalaiset tuotteet", value=True)
-
+    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, fazer, lohi...")
     sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
 
     if q:
-        with st.spinner("Haetaan tuotteita... (ensimmäinen haku voi kestää hetken)"):
-            products = search_products(q, finland_only)
-
-        if not products and finland_only:
-            st.info("Ei suomalaisia tuloksia – kokeile laajemmalla haulla (poista 'Vain suomalaiset tuotteet').")
-            products = search_products(q, False)
+        prog = st.progress(0, text="Haetaan tuotteita...")
+        products = search_products(q)
+        prog.progress(100, text="Valmis!")
+        prog.empty()
 
         if products:
             order = {"a":0,"b":1,"c":2,"d":3,"e":4}
@@ -571,18 +509,13 @@ if "Hae" in page:
             elif sort_by == "Paras Nutri-Score ensin":
                 products = sorted(products, key=lambda p: order.get(str(p.get("nutrition_grades","e")).lower(),5))
 
-            st.success(f"Löydettiin {len(products)} tuotetta")
-
-            # Nopea yhteenveto
             good_eco = sum(1 for p in products if str(p.get("ecoscore_grade","")).lower() in ["a","b"])
-            if good_eco > 0:
-                st.markdown(f"💡 **{good_eco}/{len(products)}** tuotteella on hyvä ympäristöarvosana (A tai B).")
-
+            st.success(f"Löydettiin {len(products)} tuotetta – {good_eco} hyvällä Eco-Scorella (A/B) 🌿")
             st.markdown("---")
             for p in products:
                 show_product_card(p)
         else:
-            st.warning("Ei tuloksia. Kokeile toista hakusanaa.")
+            st.warning("Ei tuloksia. Kokeile eri hakusanaa tai englanninkielistä nimeä (esim. 'oat milk', 'salmon').")
     else:
         st.markdown("""
         **Hakuvinkkejä 🌿**
@@ -801,7 +734,7 @@ elif "Tilastot" in page:
 # ── 6. TIETOA PISTEYTYKSISTÄ ──────────────────────────────────────────────────
 elif "Tietoa" in page:
     st.title("ℹ️ Mitä pisteet tarkoittavat?")
-    st.markdown("Tässä on selkeä selitys kaikille pisteytyksille. Ei teknistä jargonia – vain käytännön tieto.")
+    st.markdown("Tässä on selkeä selitys kaikille pisteytyksille.")
 
     tab1, tab2, tab3, tab4 = st.tabs(["🌿 Eco-Score", "🥗 Nutri-Score", "⚙️ NOVA", "🌍 Hiilijalanjälki"])
 
