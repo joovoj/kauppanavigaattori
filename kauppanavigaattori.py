@@ -31,12 +31,19 @@ st.markdown("""
   /* Napit */
   .stButton > button {
       background-color: #1a5c2a !important;
-      color: white !important;
+      color: #ffffff !important;
       border: none !important;
       border-radius: 8px !important;
-      font-weight: 600 !important;
+      font-weight: 700 !important;
+      font-size: 14px !important;
+      padding: 0.4rem 1rem !important;
   }
-  .stButton > button:hover { background-color: #0d3b18 !important; }
+  .stButton > button * { color: #ffffff !important; }
+  .stButton > button:hover {
+      background-color: #0d3b18 !important;
+      color: #ffffff !important;
+  }
+  .stButton > button p { color: #ffffff !important; }
 
   /* Input-kentät – valkoinen tausta, tumma teksti, vihreä reuna */
   .stTextInput > div > div > input {
@@ -150,29 +157,54 @@ def _get_with_retry(url: str, params: dict, retries: int = 3, timeout: int = 12)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def search_products(query: str, finland_only: bool = True) -> list:
-    """Search with cache (10 min) + automatic fallback if Finland filter yields nothing."""
-    params = {
+    """Haku välimuistilla (10 min) + automaattinen fallback globaaliin hakuun."""
+    # Yritetään ensin suoraan v2 search API joka on luotettavampi
+    params_v2 = {
+        "search_terms": query,
+        "json": 1,
+        "page_size": 20,
+        "fields": FIELDS,
+        "sort_by": "unique_scans_n"  # suosituimmat ensin
+    }
+    if finland_only:
+        params_v2["countries_tags_en"] = "finland"
+
+    data = _get_with_retry(f"{OFF}/cgi/search.pl", {
         "search_terms": query,
         "search_simple": 1,
         "action": "process",
         "json": 1,
         "page_size": 20,
-        "fields": FIELDS
-    }
-    if finland_only:
-        params.update({"tagtype_0": "countries", "tag_contains_0": "contains", "tag_0": "finland"})
-
-    data = _get_with_retry(f"{OFF}/cgi/search.pl", params)
+        "fields": FIELDS,
+        "sort_by": "unique_scans_n",
+        **({"tagtype_0": "countries", "tag_contains_0": "contains", "tag_0": "finland"} if finland_only else {})
+    })
     results = (data or {}).get("products", [])
 
-    # Auto-fallback: jos Suomi-filtteri ei tuota riittävästi tuloksia, hae globaalisti
-    if finland_only and len(results) < 3:
-        params_global = {k: v for k, v in params.items()
-                         if k not in ("tagtype_0", "tag_contains_0", "tag_0")}
-        data2 = _get_with_retry(f"{OFF}/cgi/search.pl", params_global)
+    # Fallback 1: jos filtteri ei tuota tuloksia, hae globaalisti
+    if len(results) < 2:
+        data2 = _get_with_retry(f"{OFF}/cgi/search.pl", {
+            "search_terms": query,
+            "search_simple": 1,
+            "action": "process",
+            "json": 1,
+            "page_size": 20,
+            "fields": FIELDS,
+            "sort_by": "unique_scans_n"
+        })
         results = (data2 or {}).get("products", []) or results
 
-    return [p for p in results if p.get("product_name")]  # poistetaan tyhjät
+    # Fallback 2: kokeile v2 API:a jos cgi ei toimi
+    if len(results) < 2:
+        data3 = _get_with_retry(f"{OFF}/api/v2/search", {
+            "search_terms": query,
+            "json": 1,
+            "page_size": 20,
+            "fields": FIELDS
+        })
+        results = (data3 or {}).get("products", []) or results
+
+    return [p for p in results if p.get("product_name")]
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_by_barcode(barcode: str) -> dict | None:
@@ -206,6 +238,52 @@ def find_alternatives(categories_str: str, own_code: str) -> list:
     data = _get_with_retry(f"{OFF}/cgi/search.pl", params)
     results = (data or {}).get("products", [])
     return [p for p in results if p.get("code") != own_code and p.get("product_name")][:4]
+
+def get_recipe_links(product_name: str, categories: list) -> list:
+    """Palauttaa klikattavia reseptilinkkejä tuotteen nimen ja kategorian perusteella."""
+    name = product_name.lower()
+    cats = " ".join(categories).lower()
+
+    # Hakusana reseptejä varten
+    search_term = product_name.split(" ")[0] if product_name else "ruoka"
+
+    recipes = []
+
+    # Kotikokki.net haku
+    kotikokki_url = f"https://www.kotikokki.net/reseptit/haku/?search={requests.utils.quote(search_term)}"
+    recipes.append({"site": "🍽️ Kotikokki.net", "url": kotikokki_url, "desc": f"Reseptejä hakusanalla '{search_term}'"})
+
+    # Ruokaisa.fi haku
+    ruokaisa_url = f"https://www.ruokaisa.fi/?s={requests.utils.quote(search_term)}"
+    recipes.append({"site": "👨‍🍳 Ruokaisa.fi", "url": ruokaisa_url, "desc": f"Reseptejä sanalla '{search_term}'"})
+
+    # K-Ruoka reseptit
+    kruoka_url = f"https://www.k-ruoka.fi/reseptit?search={requests.utils.quote(search_term)}"
+    recipes.append({"site": "🛒 K-Ruoka reseptit", "url": kruoka_url, "desc": f"K-Ruoan reseptit: '{search_term}'"})
+
+    # Soppa365
+    soppa_url = f"https://www.soppa365.fi/?s={requests.utils.quote(search_term)}"
+    recipes.append({"site": "🥣 Soppa365", "url": soppa_url, "desc": f"Reseptejä: '{search_term}'"})
+
+    # Kasvis-spesifi
+    if any(k in cats+name for k in ["kasvis","vegan","oat","kaura","soija","tofu","papu","linssi"]):
+        recipes.append({
+            "site": "🌱 Vegaaniliitto reseptit",
+            "url": f"https://www.vegaaniliitto.fi/?s={requests.utils.quote(search_term)}",
+            "desc": "Kasvis- ja vegaanireseptit"
+        })
+
+    # Kala-spesifi
+    if any(k in cats+name for k in ["kala","lohi","ahven","siika","hauki","fish","salmon"]):
+        recipes.append({
+            "site": "🐟 Kalareseptit",
+            "url": f"https://www.kotikokki.net/reseptit/haku/?search={requests.utils.quote(search_term)}+kala",
+            "desc": "Kalareseptit"
+        })
+
+    return recipes
+
+
 
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
@@ -729,74 +807,86 @@ elif "Tietoa" in page:
 
     with tab1:
         st.markdown("""
-        ## 🌿 Eco-Score (A–E)
-        Eco-Score kertoo **ruoan kokonaisvaikutuksen ympäristöön** yhdellä kirjaimella.
+        ## 🌿 Eco-Score – Miten ympäristöystävällinen tuote on?
 
-        | Arvosana | Merkitys | Esimerkki |
+        Eco-Score on yksinkertainen kirjain A–E joka kertoo, kuinka paljon ruoka rasittaa ympäristöä.
+        **A on paras, E on heikoin.**
+
+        | Kirjain | Mitä se käytännössä tarkoittaa | Tyypillisiä tuotteita |
         |---|---|---|
-        | **A** 🟢 | Erinomainen – minimaalinen ympäristövaikutus | Luomuvihannekset, palkokasvit |
-        | **B** 🟡 | Hyvä – pieni ympäristövaikutus | Luomumaito, kotimainen kala |
-        | **C** 🟠 | Kohtalainen – keskitasoinen | Tavallinen pasta, kananmuna |
-        | **D** 🔴 | Korkea vaikutus | Tavallinen juusto, kalkkunaleikkele |
-        | **E** 🔴 | Hyvin korkea vaikutus | Naudanliha, tiettyjä juustoja |
+        | **A** 🟢 | Luonnolle erittäin ystävällinen | Luomuvihannekset, pavut, linssit |
+        | **B** 🟡 | Hyvä valinta ympäristön kannalta | Luomumaito, kotimainen kala |
+        | **C** 🟠 | Ihan ok, ei erityisen hyvä eikä huono | Pasta, kananmuna, juusto |
+        | **D** 🔴 | Rasittaa ympäristöä enemmän | Leikkeleet, tavallinen juusto |
+        | **E** 🔴 | Kuormittaa ympäristöä paljon | Naudanliha, lammas |
 
-        **Miten se lasketaan?**
-        Eco-Scoressa huomioidaan koko tuotteen elinkaari: viljely/kasvatus, jalostus, kuljetus, pakkaus ja jätteidenkäsittely.
-        Bonuspisteitä saa esim. luomumerkinnöistä, kierrätettävistä pakkauksista ja lähituotannosta.
+        **Mistä pisteet tulevat?** Katsotaan koko matka pellolta kauppaan: viljely, tehdas, kuljetus ja pakkaus.
+        Luomumerkki, kierrätettävä pakkaus ja lähituotanto parantavat pisteitä.
+
+        💚 **Pieni vinkki:** Vaihda naudanliha kanaan tai kalaan – se on yksi nopeimmista tavoista pienentää ruoan ympäristövaikutusta.
         """)
 
     with tab2:
         st.markdown("""
-        ## 🥗 Nutri-Score (A–E)
-        Nutri-Score kertoo **tuotteen ravitsemuksellisen laadun** – onko se terveellinen valinta?
+        ## 🥗 Nutri-Score – Kuinka terveellinen tuote on?
 
-        | Arvosana | Merkitys |
+        Nutri-Score kertoo yhdellä kirjaimella (A–E) onko ruoka ravitsemuksellisesti hyvä valinta.
+        **A on paras, E on heikoin.**
+
+        | Kirjain | Mitä se tarkoittaa |
         |---|---|
-        | **A** 🟢 | Erinomainen ravintosisältö |
-        | **B** 🟡 | Hyvä ravintosisältö |
-        | **C** 🟠 | Kohtalainen |
-        | **D** 🔴 | Vähän ravinteita suhteessa kalorimäärään |
-        | **E** 🔴 | Runsaasti sokeria, suolaa tai rasvaa |
+        | **A** 🟢 | Todella ravitseva – loistava arkiruoka |
+        | **B** 🟡 | Hyvä valinta – sopii säännölliseen käyttöön |
+        | **C** 🟠 | Ihan ok – ei erityisen hyvä eikä huono |
+        | **D** 🔴 | Paljon sokeria, suolaa tai rasvaa |
+        | **E** 🔴 | Herkuttelutuote – sopii silloin tällöin |
 
-        **Huom:** Nutri-Score ei tarkoita, että E-tuotteet olisivat kiellettyjä!
-        Se vain auttaa vertailemaan tuotteita keskenään. Herkku voi olla E – ja se on täysin ok silloin tällöin. 🍫
+        **Miten pisteet lasketaan?** Katsotaan 100 grammaa tuotetta:
+        - Miinuspisteitä: sokeri, suola, kova rasva, kalorit
+        - Pluspisteitä: kuitu, proteiini, hedelmät, vihannekset
+
+        🍫 **Muista:** E-arvosana ei tarkoita kiellettyä! Suklaa voi olla E, mutta se on silti ok herkutteluun.
+        Nutri-Score auttaa vain valitsemaan paremmin kun on useampi vaihtoehto.
         """)
 
     with tab3:
         st.markdown("""
-        ## ⚙️ NOVA-ryhmittely (1–4)
-        NOVA kertoo **kuinka paljon ruoka on teollisesti prosessoitu** – ei ravintosisältöä, vaan käsittelyn määrää.
+        ## ⚙️ NOVA – Kuinka valmis ruoka on tehtaalla tehty?
 
-        | Ryhmä | Kuvaus | Esimerkki |
+        NOVA ei kerro onko ruoka terveellistä – se kertoo **kuinka paljon teollisuus on käsitellyt sitä**.
+        Numerot 1–4, jossa 1 on lähes luonnontilaista ja 4 on hyvin pitkälle prosessoitua.
+
+        | Numero | Mitä se tarkoittaa | Esimerkkejä |
         |---|---|---|
-        | **NOVA 1** 🥦 | Käsittelemätön tai minimaalisesti käsitelty | Hedelmät, vihannekset, liha, kala, kananmuna |
-        | **NOVA 2** 🧂 | Keittiöainekset | Öljy, sokeri, suola, voi |
-        | **NOVA 3** 🍞 | Prosessoitu elintarvike | Juusto, purkkilihaliemi, savustettu kala |
-        | **NOVA 4** 🍟 | Ultra-prosessoitu | Sipsit, patukat, limsat, valmisateriat, nuggetit |
+        | **1** 🥦 | Suoraan luonnosta, ei juurikaan käsitelty | Omenat, porkkanat, kananmuna, lohi, riisi |
+        | **2** 🧂 | Keittiön perusaineet | Öljy, suola, sokeri, voi, jauhot |
+        | **3** 🍞 | Valmistettu ruoka, muutama lisäaine | Juusto, säilykkeet, savustettu kinkku, leipä |
+        | **4** 🍟 | Tehdassali täynnä lisäaineita | Sipsit, makeiset, pikanuudelit, valmisateriat, energiajuomat |
 
-        **Miksi tällä on väliä?**
-        Tutkimukset yhdistävät NOVA-4-ruokien runsaan käytön terveyshaittoihin.
-        NOVA ei kuitenkaan tarkoita, että NOVA-4 tuotteet ovat kiellettyjä – ne sopivat satunnaiseen nauttimiseen!
+        **Miksi tällä on väliä?** Tutkimukset viittaavat siihen, että NOVA 4 -ruokien syöminen joka päivä
+        voi olla yhteydessä terveyshaittoihin. Mutta se ei tarkoita, että pizzaa tai sipsejä ei saisi syödä! 🍕
         """)
 
     with tab4:
         st.markdown("""
-        ## 🌍 Hiilijalanjälki (CO₂e / 100g)
-        Kertoo kuinka paljon **kasvihuonekaasupäästöjä** (CO₂-ekvivalentti) syntyy 100 grammaa tuotetta kohti.
+        ## 🌍 Hiilijalanjälki – Kuinka paljon tuote päästää hiilidioksidia?
 
-        | Taso | CO₂e / 100g | Tyypilliset tuotteet |
+        Hiilijalanjälki kertoo kuinka paljon ilmastolle haitallisia kaasuja syntyy kun tuote valmistetaan.
+        Se mitataan grammoina CO₂ per 100 grammaa ruokaa. **Mitä pienempi luku, sitä parempi.**
+
+        | Luku | Mitä se tarkoittaa | Tyypillisiä tuotteita |
         |---|---|---|
-        | 🌱 Hyvin pieni | alle 30 g | Vihannekset, hedelmät, palkokasvit |
-        | 👍 Pieni | 30–80 g | Kananmuna, luomumaito, kala |
-        | 🟡 Keskitaso | 80–200 g | Juusto, sianliha, prosessoidut ruoat |
-        | ⚠️ Suuri | 200–400 g | Naudanliha, lammas |
-        | 🔴 Erittäin suuri | yli 400 g | Naudan jauheliha, tiettyjä juustoja |
+        | alle 30 g | 🌱 Erittäin pieni | Kasvikset, hedelmät, pavut |
+        | 30–80 g | 👍 Pieni | Kananmuna, kala, kauramaito |
+        | 80–200 g | 🟡 Kohtalainen | Sianliha, juusto, pasta |
+        | 200–400 g | ⚠️ Suuri | Naudanliha |
+        | yli 400 g | 🔴 Erittäin suuri | Karitsa, jauheliha |
 
-        **Vinkkejä hiilijalanjäljen pienentämiseen:**
-        - 🌱 Kasvispohjainen ruoka on yleensä pienempi hiilijalanjälki
-        - 🐟 Kala on usein parempi vaihtoehto kuin naudan liha
-        - 🥛 Kasvipohjaiset maitovaihtoehdot (kaura, soija) ovat pienempiä kuin tavallinen maito
-        - 🏠 Kotimaiset tuotteet = lyhyempi kuljetus = pienempi vaikutus
+        **Helpot keinot pienentää ruoan hiilijalanjälkeä:**
+        - 🥦 Syö enemmän kasviksia – ne ovat aina pieniä hiilijalanjäljeltään
+        - 🐟 Valitse kala naudanlihan sijaan kun sopii
+        - 🥛 Kokeile kauramaitoa – sen jalanjälki on noin 80% pienempi kuin tavallisella maidolla
+        - 🇫🇮 Suosi kotimaista – lyhyempi matka = vähemmän päästöjä kuljetuksesta
         """)
 
     st.markdown("---")
