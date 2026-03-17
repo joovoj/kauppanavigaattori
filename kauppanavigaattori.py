@@ -151,45 +151,113 @@ def _fetch(url: str, params: dict, timeout: int = 15) -> dict | None:
     return None
 
 @st.cache_data(ttl=600, show_spinner=False)
+# Suomi-hakusanojen käännökset englanniksi (OFF-data on pääosin englanniksi)
+FI_TO_EN = {
+    "maito": "milk", "kevytmaito": "semi skimmed milk", "täysmaito": "whole milk",
+    "kauramaito": "oat milk", "soijamaito": "soy milk", "kaurajuoma": "oat drink",
+    "jogurtti": "yogurt", "kermaviili": "sour cream", "raejuusto": "cottage cheese",
+    "juusto": "cheese", "emmental": "emmental", "kananmuna": "egg",
+    "voi": "butter", "margariini": "margarine", "kerma": "cream",
+    "jauheliha": "minced meat", "naudan jauheliha": "beef mince",
+    "broileri": "chicken", "kana": "chicken", "kalkkuna": "turkey",
+    "lohi": "salmon", "silakka": "baltic herring", "muikku": "vendace",
+    "tonnikala": "tuna", "silli": "herring", "sei": "saithe",
+    "peruna": "potato", "porkkana": "carrot", "tomaatti": "tomato",
+    "kurkku": "cucumber", "paprika": "bell pepper", "sipuli": "onion",
+    "valkosipuli": "garlic", "pinaatti": "spinach", "parsakaali": "broccoli",
+    "kaali": "cabbage", "salaatti": "lettuce", "punajuuri": "beetroot",
+    "lanttu": "swede", "nauris": "turnip", "palsternakka": "parsnip",
+    "kesäkurpitsa": "zucchini", "kurpitsa": "pumpkin",
+    "omena": "apple", "banaani": "banana", "appelsiini": "orange",
+    "mansikka": "strawberry", "mustikka": "blueberry", "puolukka": "lingonberry",
+    "vadelma": "raspberry", "päärynä": "pear", "viinimarja": "currant",
+    "pasta": "pasta", "riisi": "rice", "kaura": "oat", "vehnä": "wheat",
+    "ruisleipä": "rye bread", "hapanleipä": "sourdough", "pulla": "bun",
+    "linssit": "lentils", "kikherneet": "chickpeas", "härkäpapu": "fava bean",
+    "papu": "bean", "soija": "soy", "tofu": "tofu",
+    "nyhtökaura": "pulled oats", "härkis": "faba bean mince",
+    "suklaa": "chocolate", "keksi": "cookie", "mysli": "muesli",
+    "pähkinä": "nuts", "manteli": "almond", "cashew": "cashew",
+    "oliiviöljy": "olive oil", "rypsiöljy": "rapeseed oil",
+    "kahvi": "coffee", "tee": "tea", "mehu": "juice",
+    "kivennäisvesi": "sparkling water", "limonadi": "lemonade",
+}
+
+def _translate_query(query: str) -> str:
+    """Kääntää suomenkielisen hakusanan englanniksi OFF-hakua varten."""
+    q = query.lower().strip()
+    if q in FI_TO_EN:
+        return FI_TO_EN[q]
+    # Osittainen täsmäys
+    for fi, en in FI_TO_EN.items():
+        if fi in q:
+            return q.replace(fi, en)
+    return query
+
+def _is_relevant(product: dict, query: str) -> bool:
+    """Tarkistaa onko tuote relevantti haulle – suodattaa epäolennaiset pois."""
+    name = (product.get("product_name") or "").lower()
+    brand = (product.get("brands") or "").lower()
+    cats = " ".join(product.get("categories_tags") or []).lower()
+    combined = f"{name} {brand} {cats}"
+    q_words = query.lower().split()
+    # Vähintään yksi hakusana löytyy tuotetiedoista
+    return any(w in combined for w in q_words if len(w) > 2)
+
 def search_products(query: str) -> list:
     """
-    Haku kolmella eri strategialla peräkkäin.
-    Palauttaa ensimmäisen joka antaa tuloksia.
+    Haku kolmella strategialla. Käyttää suomi→englanti -käännöstä
+    jos hakusana on suomeksi, jotta OFF:n englanninkielinen data löytyy.
+    Suodattaa epäolennaiset tulokset pois.
     """
-    # Strategia 1: Yksinkertainen haku (nopein, toimii 90% ajasta)
-    data = _fetch(f"{OFF}/cgi/search.pl", {
-        "search_terms": query,
+    en_query = _translate_query(query)
+    use_en = en_query.lower() != query.lower()
+
+    base_params = {
         "search_simple": 1,
         "action": "process",
         "json": 1,
-        "page_size": 16,
+        "page_size": 24,
         "fields": FIELDS_SEARCH,
         "sort_by": "unique_scans_n",
-    })
-    results = (data or {}).get("products", [])
+    }
 
-    # Strategia 2: v2 search API – jos 1 ei toimi
-    if len(results) < 1:
+    results = []
+
+    # Strategia 1a: hae englanninkäännöksellä (jos suomenkielinen haku)
+    if use_en:
+        data = _fetch(f"{OFF}/cgi/search.pl", {**base_params, "search_terms": en_query})
+        results = (data or {}).get("products", [])
+
+    # Strategia 1b: hae alkuperäisellä hakusanalla
+    if len(results) < 2:
+        data = _fetch(f"{OFF}/cgi/search.pl", {**base_params, "search_terms": query})
+        r2 = (data or {}).get("products", [])
+        # Yhdistä tulokset, älä lisää duplikaatteja
+        existing_codes = {p.get("code") for p in results}
+        results += [p for p in r2 if p.get("code") not in existing_codes]
+
+    # Strategia 2: v2 API viimeisenä
+    if len(results) < 2:
         data = _fetch(f"{OFF}/api/v2/search", {
-            "search_terms": query,
-            "page_size": 16,
+            "search_terms": en_query if use_en else query,
+            "page_size": 24,
             "fields": FIELDS_SEARCH,
             "sort_by": "unique_scans_n",
         })
-        results = (data or {}).get("products", [])
+        r3 = (data or {}).get("products", [])
+        existing_codes = {p.get("code") for p in results}
+        results += [p for p in r3 if p.get("code") not in existing_codes]
 
-    # Strategia 3: Kielikohtainen haku englanniksi – viimeinen vaihtoehto
-    if len(results) < 1:
-        data = _fetch(f"https://world.openfoodfacts.org/cgi/search.pl", {
-            "search_terms": query,
-            "action": "process",
-            "json": 1,
-            "page_size": 16,
-            "fields": FIELDS_SEARCH,
-        })
-        results = (data or {}).get("products", [])
+    # Suodata: poista tuotteet joilla ei ole nimeä
+    results = [p for p in results if p.get("product_name")]
 
-    return [p for p in results if p.get("product_name")]
+    # Suodata: priorisoi relevantit tulokset ensin, mutta pidä kaikki
+    relevant = [p for p in results if _is_relevant(p, en_query if use_en else query)]
+    others = [p for p in results if not _is_relevant(p, en_query if use_en else query)]
+
+    # Palauta relevantit ensin, sitten muut (max 20 yhteensä)
+    return (relevant + others)[:20]
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_by_barcode(barcode: str) -> dict | None:
@@ -632,6 +700,9 @@ if "Hae" in page:
     sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
 
     if q:
+        en_hint = _translate_query(q)
+        if en_hint.lower() != q.lower():
+            st.caption(f"🔎 Haetaan suomenkielisellä sanalla + englanninkäännöksellä: **{en_hint}**")
         prog = st.progress(0, text="Haetaan tuotteita...")
         products = search_products(q)
         prog.progress(100, text="Valmis!")
