@@ -226,52 +226,76 @@ def _is_relevant(product: dict, query: str) -> bool:
 @st.cache_data(ttl=600, show_spinner=False)
 def search_products(query: str) -> list:
     """
-    Haku kolmella strategialla. Käyttää suomi→englanti -käännöstä
-    jos hakusana on suomeksi, jotta OFF:n englanninkielinen data löytyy.
-    Suodattaa epäolennaiset tulokset pois.
+    Hakee VAIN suomalaisia ja pohjoismaisia tuotteita.
+    1. Yrittää ensin hakea Suomi-filtterillä + englanninkäännöksellä
+    2. Jos alle 2 tulosta, yrittää pohjoismaisella filtterillä
+    3. Jos edelleen tyhjä, yrittää ilman filtteriä mutta suodattaa
+       tiukasti vain pohjoismaiset tulokset
     """
     en_query = _translate_query(query)
     use_en = en_query.lower() != query.lower()
+    search_term = en_query if use_en else query
 
-    base_params = {
-        "search_simple": 1,
-        "action": "process",
-        "json": 1,
-        "page_size": 24,
-        "fields": FIELDS_SEARCH,
-        "sort_by": "unique_scans_n",
-    }
-
-    results = []
-
-    # Strategia 1a: hae englanninkäännöksellä (jos suomenkielinen haku)
-    if use_en:
-        data = _fetch(f"{OFF}/cgi/search.pl", {**base_params, "search_terms": en_query})
-        results = (data or {}).get("products", [])
-
-    # Strategia 1b: hae alkuperäisellä hakusanalla
-    if len(results) < 2:
-        data = _fetch(f"{OFF}/cgi/search.pl", {**base_params, "search_terms": query})
-        r2 = (data or {}).get("products", [])
-        # Yhdistä tulokset, älä lisää duplikaatteja
-        existing_codes = {p.get("code") for p in results}
-        results += [p for p in r2 if p.get("code") not in existing_codes]
-
-    # Strategia 2: v2 API viimeisenä
-    if len(results) < 2:
-        data = _fetch(f"{OFF}/api/v2/search", {
-            "search_terms": en_query if use_en else query,
-            "page_size": 24,
+    def fetch_with_country(term, country_tag, page_size=24):
+        """Haku country-tagilla OFF:n tagihaku-API:lla."""
+        data = _fetch(f"{OFF}/cgi/search.pl", {
+            "search_terms": term,
+            "tagtype_0": "countries",
+            "tag_contains_0": "contains",
+            "tag_0": country_tag,
+            "search_simple": 1,
+            "action": "process",
+            "json": 1,
+            "page_size": page_size,
             "fields": FIELDS_SEARCH,
             "sort_by": "unique_scans_n",
         })
-        r3 = (data or {}).get("products", [])
-        existing_codes = {p.get("code") for p in results}
-        results += [p for p in r3 if p.get("code") not in existing_codes]
+        return (data or {}).get("products", [])
 
+    results = []
+
+    # Vaihe 1: Hae suomalaiset tuotteet englanninkäännöksellä
+    results = fetch_with_country(search_term, "finland")
+
+    # Vaihe 2: Jos ei tuloksia, kokeile alkuperäisellä hakusanalla
+    if len(results) < 2 and use_en:
+        r2 = fetch_with_country(query, "finland")
+        codes = {p.get("code") for p in results}
+        results += [p for p in r2 if p.get("code") not in codes]
+
+    # Vaihe 3: Laajenna pohjoismaisiin (Ruotsi, Norja, Tanska, Viro)
+    if len(results) < 2:
+        for country in ["sweden", "norway", "denmark", "estonia"]:
+            r_nordic = fetch_with_country(search_term, country)
+            codes = {p.get("code") for p in results}
+            results += [p for p in r_nordic if p.get("code") not in codes]
+            if len(results) >= 4:
+                break
+
+    # Vaihe 4: Viimeinen vaihtoehto – hae ilman filtteriä mutta
+    # suodata tiukasti: pidä VAIN pohjoismaiset tai nimetyt tuotteet
+    if len(results) < 2:
+        data = _fetch(f"{OFF}/cgi/search.pl", {
+            "search_terms": search_term,
+            "search_simple": 1,
+            "action": "process",
+            "json": 1,
+            "page_size": 50,
+            "fields": FIELDS_SEARCH,
+            "sort_by": "unique_scans_n",
+        })
+        all_results = (data or {}).get("products", [])
+        codes = {p.get("code") for p in results}
+        for p in all_results:
+            if p.get("code") in codes:
+                continue
+            ctags = set(p.get("countries_tags") or [])
+            if ctags & NORDIC_COUNTRIES:
+                results.append(p)
+
+    # Poista tuotteet ilman nimeä ja järjestä pistemäärän mukaan
     results = [p for p in results if p.get("product_name")]
-    search_q = en_query if use_en else query
-    results.sort(key=lambda p: _score_product(p, search_q), reverse=True)
+    results.sort(key=lambda p: _score_product(p, search_term), reverse=True)
     return results[:20]
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -719,7 +743,9 @@ if "Hae" in page:
     if q:
         en_hint = _translate_query(q)
         if en_hint.lower() != q.lower():
-            st.caption(f"🔎 Haetaan suomenkielisellä sanalla + englanninkäännöksellä: **{en_hint}**")
+            st.caption(f"🔎 Haetaan: **{en_hint}** · Näytetään vain suomalaiset ja pohjoismaiset tuotteet 🇫🇮")
+        else:
+            st.caption("🇫🇮 Näytetään vain suomalaiset ja pohjoismaiset tuotteet")
         prog = st.progress(0, text="Haetaan tuotteita...")
         products = search_products(q)
         prog.progress(100, text="Valmis!")
@@ -738,7 +764,7 @@ if "Hae" in page:
             for p in products:
                 show_product_card(p)
         else:
-            st.warning("Ei tuloksia. Kokeile eri hakusanaa tai englanninkielistä nimeä (esim. 'oat milk', 'salmon').")
+            st.warning("Ei suomalaisia/pohjoismaisia tuloksia. Tätä tuotetta ei löydy Open Food Facts -tietokannasta Suomesta. Kokeile viivakoodiskannausta tai englanninkielistä nimeä (esim. 'salmon', 'oat milk').")
     else:
         st.markdown("""
         **Hakuvinkkejä 🌿**
