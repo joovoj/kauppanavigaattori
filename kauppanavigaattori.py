@@ -136,7 +136,7 @@ import time
 
 OFF   = "https://world.openfoodfacts.org"
 # Käytetään vain välttämättömät kentät – vähemmän dataa = nopeampi vastaus
-FIELDS_SEARCH = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags"
+FIELDS_SEARCH = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,countries_tags,labels_tags"
 FIELDS_FULL   = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_url,categories_tags,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text"
 HEADERS = {"User-Agent": "KauppaNavigaattori/2.0"}
 
@@ -193,15 +193,35 @@ def _translate_query(query: str) -> str:
             return q.replace(fi, en)
     return query
 
-def _is_relevant(product: dict, query: str) -> bool:
-    """Tarkistaa onko tuote relevantti haulle – suodattaa epäolennaiset pois."""
-    name = (product.get("product_name") or "").lower()
+NORDIC_COUNTRIES = {"en:finland","en:sweden","en:norway","en:denmark","en:estonia",
+                    "fi:suomi","fi:finland","se:sverige","sv:sweden"}
+
+def _score_product(product: dict, query: str) -> int:
+    """Pisteytysfunktio tulosten järjestämiseen – pohjoismaiset ja relevantit ensin."""
+    score = 0
+    name  = (product.get("product_name") or "").lower()
     brand = (product.get("brands") or "").lower()
-    cats = " ".join(product.get("categories_tags") or []).lower()
-    combined = f"{name} {brand} {cats}"
-    q_words = query.lower().split()
-    # Vähintään yksi hakusana löytyy tuotetiedoista
-    return any(w in combined for w in q_words if len(w) > 2)
+    cats  = " ".join(product.get("categories_tags") or []).lower()
+    ctags = set(product.get("countries_tags") or [])
+    ltags = set(product.get("labels_tags") or [])
+
+    q_words = [w for w in query.lower().split() if len(w) > 2]
+    for w in q_words:
+        if w in name:  score += 10
+        elif w in brand: score += 5
+        elif w in cats:  score += 2
+
+    if ctags & NORDIC_COUNTRIES:
+        score += 15
+    finnish_labels = {"en:organic","fi:luomu","fi:hyvaa-suomesta","fi:avainlippu","en:finnish-heart-symbol"}
+    if ltags & finnish_labels:
+        score += 8
+    if name and not any(c.isascii() for c in name[:10]):
+        score -= 5
+    return score
+
+def _is_relevant(product: dict, query: str) -> bool:
+    return _score_product(product, query) > 0
 
 @st.cache_data(ttl=600, show_spinner=False)
 def search_products(query: str) -> list:
@@ -249,15 +269,10 @@ def search_products(query: str) -> list:
         existing_codes = {p.get("code") for p in results}
         results += [p for p in r3 if p.get("code") not in existing_codes]
 
-    # Suodata: poista tuotteet joilla ei ole nimeä
     results = [p for p in results if p.get("product_name")]
-
-    # Suodata: priorisoi relevantit tulokset ensin, mutta pidä kaikki
-    relevant = [p for p in results if _is_relevant(p, en_query if use_en else query)]
-    others = [p for p in results if not _is_relevant(p, en_query if use_en else query)]
-
-    # Palauta relevantit ensin, sitten muut (max 20 yhteensä)
-    return (relevant + others)[:20]
+    search_q = en_query if use_en else query
+    results.sort(key=lambda p: _score_product(p, search_q), reverse=True)
+    return results[:20]
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_by_barcode(barcode: str) -> dict | None:
@@ -628,6 +643,8 @@ def show_product_card(p: dict):
     img = p.get("image_front_small_url")
     code = p.get("code","")
     eco_col = {"a":"🟢","b":"🟡","c":"🟠","d":"🔴","e":"🔴"}.get(str(eco).lower(),"⚪")
+    ctags = set(p.get("countries_tags") or [])
+    country_flag = "🇫🇮 " if ctags & NORDIC_COUNTRIES else ""
 
     with st.container():
         st.markdown("<div class='product-card'>", unsafe_allow_html=True)
@@ -636,7 +653,7 @@ def show_product_card(p: dict):
             if img:
                 st.image(img, width=65)
         with c2:
-            st.markdown(f"**{name}**")
+            st.markdown(f"{country_flag}**{name}**")
             if brand:
                 st.caption(brand)
             st.markdown(
