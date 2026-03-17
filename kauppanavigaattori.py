@@ -150,7 +150,6 @@ def _fetch(url: str, params: dict, timeout: int = 15) -> dict | None:
         pass
     return None
 
-@st.cache_data(ttl=600, show_spinner=False)
 # Suomi-hakusanojen käännökset englanniksi (OFF-data on pääosin englanniksi)
 FI_TO_EN = {
     "maito": "milk", "kevytmaito": "semi skimmed milk", "täysmaito": "whole milk",
@@ -204,6 +203,7 @@ def _is_relevant(product: dict, query: str) -> bool:
     # Vähintään yksi hakusana löytyy tuotetiedoista
     return any(w in combined for w in q_words if len(w) > 2)
 
+@st.cache_data(ttl=600, show_spinner=False)
 def search_products(query: str) -> list:
     """
     Haku kolmella strategialla. Käyttää suomi→englanti -käännöstä
