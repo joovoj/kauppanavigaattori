@@ -113,9 +113,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── APUDATA ──────────────────────────────────────────────────────────────────
-HISTORY_FILE = "ostohistoria.json"
-SHOPPING_FILE = "ostoslista.json"
-WASTE_FILE = "kaappitavarat.json"
+HISTORY_FILE   = "ostohistoria.json"
+SHOPPING_FILE  = "ostoslista.json"
+WASTE_FILE     = "kaappitavarat.json"
+MEALPLAN_FILE  = "ateriasuunnitelma.json"
+POINTS_FILE    = "kestävyyspisteet.json"
+EXPIRY_FILE    = "kaappitavarat_pvm.json"
 
 def load_json(path):
     if os.path.exists(path):
@@ -127,9 +130,24 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-for key, file in [("history", HISTORY_FILE), ("shopping", SHOPPING_FILE), ("waste", WASTE_FILE)]:
+for key, file in [
+    ("history",  HISTORY_FILE),
+    ("shopping", SHOPPING_FILE),
+    ("waste",    WASTE_FILE),
+    ("mealplan", MEALPLAN_FILE),
+    ("points",   POINTS_FILE),
+    ("expiry",   EXPIRY_FILE),
+]:
     if key not in st.session_state:
         st.session_state[key] = load_json(file)
+
+# Pisteet: varmista perusrakenne
+if not isinstance(st.session_state.points, dict):
+    st.session_state.points = {}
+st.session_state.points.setdefault("total", 0)
+st.session_state.points.setdefault("streak", 0)
+st.session_state.points.setdefault("log", [])
+st.session_state.points.setdefault("badges", [])
 
 # ── OPEN FOOD FACTS API ───────────────────────────────────────────────────────
 import time
@@ -404,6 +422,104 @@ FINELI_DB = {
     "tofu":                 {"kcal":76, "proteiini":8.0,"rasva":4.5,"hh":0.5,"kuitu":0.3,"suola":0.0,"ryhmä":"Kasviproteiinit","fineli_id":675},
     "nyhtökaura":           {"kcal":155,"proteiini":20.0,"rasva":4.5,"hh":8.5,"kuitu":5.0,"suola":0.3,"ryhmä":"Kasviproteiinit","fineli_id":5620},
     "härkis":               {"kcal":138,"proteiini":19.0,"rasva":3.5,"hh":7.5,"kuitu":5.5,"suola":0.4,"ryhmä":"Kasviproteiinit","fineli_id":5621},
+    # ── LISÄÄ TUOTTEET ──────────────────────────────────────────────────────────
+    # Kalatuotteet
+    "hauki":                {"kcal":83, "proteiini":18.0,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Kala","fineli_id":505},
+    "ahven":                {"kcal":82, "proteiini":18.5,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Kala","fineli_id":501},
+    "kirjolohi":            {"kcal":168,"proteiini":20.0,"rasva":9.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Kala","fineli_id":509},
+    "sei":                  {"kcal":72, "proteiini":16.0,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":0.2,"ryhmä":"Kala","fineli_id":512},
+    "turska":               {"kcal":76, "proteiini":17.5,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":0.2,"ryhmä":"Kala","fineli_id":513},
+    "seitifile":            {"kcal":72, "proteiini":16.0,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":0.2,"ryhmä":"Kala","fineli_id":512},
+    "savulohi":             {"kcal":185,"proteiini":23.0,"rasva":10.0,"hh":0.0,"kuitu":0.0,"suola":2.5,"ryhmä":"Kala","fineli_id":520},
+    "sardiini":             {"kcal":208,"proteiini":25.0,"rasva":11.0,"hh":0.0,"kuitu":0.0,"suola":1.5,"ryhmä":"Kala","fineli_id":518},
+    "makrilli":             {"kcal":205,"proteiini":19.0,"rasva":14.0,"hh":0.0,"kuitu":0.0,"suola":0.2,"ryhmä":"Kala","fineli_id":515},
+    "katkarapu":            {"kcal":71, "proteiini":15.5,"rasva":0.5,"hh":0.0,"kuitu":0.0,"suola":1.5,"ryhmä":"Kala","fineli_id":540},
+    # Liha lisää
+    "porsaan ulkofilee":    {"kcal":121,"proteiini":22.0,"rasva":3.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Liha","fineli_id":400},
+    "naudan entrecote":     {"kcal":218,"proteiini":19.0,"rasva":15.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Liha","fineli_id":390},
+    "lammas":               {"kcal":235,"proteiini":17.0,"rasva":18.0,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Liha","fineli_id":410},
+    "poro":                 {"kcal":119,"proteiini":22.0,"rasva":3.0,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Riista","fineli_id":443},
+    "hirvi":                {"kcal":115,"proteiini":22.0,"rasva":2.5,"hh":0.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Riista","fineli_id":442},
+    "siipikarjan maksa":    {"kcal":119,"proteiini":19.0,"rasva":4.5,"hh":1.5,"kuitu":0.0,"suola":0.2,"ryhmä":"Siipikarja","fineli_id":430},
+    "kinkku keitetty":      {"kcal":105,"proteiini":17.0,"rasva":3.5,"hh":1.0,"kuitu":0.0,"suola":1.5,"ryhmä":"Lihavalmisteet","fineli_id":460},
+    "meetvursti":           {"kcal":415,"proteiini":18.0,"rasva":37.0,"hh":1.5,"kuitu":0.0,"suola":2.5,"ryhmä":"Lihavalmisteet","fineli_id":464},
+    "makkara lenkki":       {"kcal":280,"proteiini":11.0,"rasva":25.0,"hh":3.5,"kuitu":0.0,"suola":1.8,"ryhmä":"Lihavalmisteet","fineli_id":462},
+    # Maitotuotteet lisää
+    "kreikkalainen jogurtti":{"kcal":97,"proteiini":9.0,"rasva":5.0,"hh":4.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":135},
+    "kvark":                {"kcal":65, "proteiini":11.0,"rasva":0.2,"hh":4.5,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":178},
+    "maitorahka":           {"kcal":72, "proteiini":12.0,"rasva":0.5,"hh":4.5,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":176},
+    "piimä":                {"kcal":35, "proteiini":3.3,"rasva":0.5,"hh":3.8,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":146},
+    "ruokakerma":           {"kcal":197,"proteiini":2.5,"rasva":20.0,"hh":3.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":156},
+    "vispikerma":           {"kcal":345,"proteiini":2.2,"rasva":36.0,"hh":2.8,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":157},
+    "kahvikerma":           {"kcal":197,"proteiini":2.5,"rasva":20.0,"hh":3.0,"kuitu":0.0,"suola":0.1,"ryhmä":"Maitotalous","fineli_id":156},
+    "cheddar":              {"kcal":403,"proteiini":25.0,"rasva":33.0,"hh":0.5,"kuitu":0.0,"suola":1.8,"ryhmä":"Juustot","fineli_id":162},
+    "mozzarella":           {"kcal":253,"proteiini":18.0,"rasva":20.0,"hh":0.5,"kuitu":0.0,"suola":0.6,"ryhmä":"Juustot","fineli_id":166},
+    "feta":                 {"kcal":264,"proteiini":14.0,"rasva":22.0,"hh":1.0,"kuitu":0.0,"suola":2.7,"ryhmä":"Juustot","fineli_id":163},
+    "kermajuusto":          {"kcal":342,"proteiini":7.0,"rasva":34.0,"hh":3.0,"kuitu":0.0,"suola":0.9,"ryhmä":"Juustot","fineli_id":170},
+    "sinihomejuusto":       {"kcal":353,"proteiini":21.0,"rasva":29.0,"hh":1.0,"kuitu":0.0,"suola":2.5,"ryhmä":"Juustot","fineli_id":168},
+    # Vilja lisää
+    "ohraryynit":           {"kcal":354,"proteiini":10.0,"rasva":2.0,"hh":75.0,"kuitu":10.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":750},
+    "ruisrouhe":            {"kcal":318,"proteiini":9.5,"rasva":2.5,"hh":62.0,"kuitu":16.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":745},
+    "vehnäjauho":           {"kcal":348,"proteiini":10.0,"rasva":1.5,"hh":74.0,"kuitu":2.7,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":780},
+    "ruisjauho":            {"kcal":325,"proteiini":9.0,"rasva":1.5,"hh":68.0,"kuitu":13.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":782},
+    "täysjyvävehnä":        {"kcal":320,"proteiini":10.5,"rasva":2.0,"hh":64.0,"kuitu":10.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":783},
+    "spelttijauho":         {"kcal":338,"proteiini":12.0,"rasva":2.5,"hh":68.0,"kuitu":8.0,"suola":0.0,"ryhmä":"Viljatuotteet","fineli_id":784},
+    "näkkileipä":           {"kcal":359,"proteiini":9.0,"rasva":2.0,"hh":76.0,"kuitu":10.0,"suola":1.3,"ryhmä":"Leivät","fineli_id":710},
+    "hapankorppu":          {"kcal":350,"proteiini":9.0,"rasva":2.0,"hh":74.0,"kuitu":8.5,"suola":1.1,"ryhmä":"Leivät","fineli_id":712},
+    "puuroseos":            {"kcal":350,"proteiini":10.0,"rasva":5.0,"hh":65.0,"kuitu":8.0,"suola":0.5,"ryhmä":"Viljatuotteet","fineli_id":748},
+    "mysli":                {"kcal":390,"proteiini":9.0,"rasva":7.0,"hh":73.0,"kuitu":7.0,"suola":0.3,"ryhmä":"Viljatuotteet","fineli_id":749},
+    "granola":              {"kcal":450,"proteiini":9.0,"rasva":17.0,"hh":65.0,"kuitu":5.0,"suola":0.3,"ryhmä":"Viljatuotteet","fineli_id":749},
+    # Kasvikset lisää
+    "fenkolit":             {"kcal":29, "proteiini":1.2,"rasva":0.2,"hh":5.0,"kuitu":2.7,"suola":0.1,"ryhmä":"Kasvikset","fineli_id":263},
+    "parsa":                {"kcal":22, "proteiini":2.5,"rasva":0.2,"hh":2.0,"kuitu":2.1,"suola":0.0,"ryhmä":"Kasvikset","fineli_id":252},
+    "artisokka":            {"kcal":40, "proteiini":2.5,"rasva":0.2,"hh":7.0,"kuitu":5.0,"suola":0.1,"ryhmä":"Kasvikset","fineli_id":251},
+    "lehtikaali":           {"kcal":37, "proteiini":3.0,"rasva":0.5,"hh":5.0,"kuitu":3.6,"suola":0.1,"ryhmä":"Lehtivihannekset","fineli_id":297},
+    "ruusukaali":           {"kcal":36, "proteiini":3.5,"rasva":0.3,"hh":4.5,"kuitu":4.1,"suola":0.0,"ryhmä":"Kasvikset","fineli_id":258},
+    "maissi":               {"kcal":86, "proteiini":3.2,"rasva":1.2,"hh":17.0,"kuitu":2.4,"suola":0.0,"ryhmä":"Kasvikset","fineli_id":270},
+    "herneet":              {"kcal":74, "proteiini":5.5,"rasva":0.4,"hh":12.5,"kuitu":5.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":663},
+    "pavut valkoiset":      {"kcal":127,"proteiini":8.5,"rasva":0.5,"hh":23.0,"kuitu":7.5,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":654},
+    "pavut mustat":         {"kcal":341,"proteiini":21.5,"rasva":1.4,"hh":62.0,"kuitu":15.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":655},
+    "sokeriherne pakastettu":{"kcal":74,"proteiini":5.5,"rasva":0.4,"hh":12.5,"kuitu":5.0,"suola":0.0,"ryhmä":"Palkokasvit","fineli_id":663},
+    # Hedelmät lisää
+    "mango":                {"kcal":60, "proteiini":0.8,"rasva":0.4,"hh":13.5,"kuitu":1.6,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":318},
+    "ananasa":              {"kcal":48, "proteiini":0.5,"rasva":0.1,"hh":11.5,"kuitu":1.4,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":301},
+    "kivi":                 {"kcal":61, "proteiini":1.1,"rasva":0.5,"hh":13.0,"kuitu":3.0,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":310},
+    "sitruuna":             {"kcal":29, "proteiini":1.1,"rasva":0.3,"hh":5.0,"kuitu":2.8,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":313},
+    "lime":                 {"kcal":30, "proteiini":0.7,"rasva":0.2,"hh":6.5,"kuitu":2.8,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":314},
+    "greiippi":             {"kcal":32, "proteiini":0.8,"rasva":0.1,"hh":7.0,"kuitu":1.6,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":315},
+    "vesimeloni":           {"kcal":30, "proteiini":0.6,"rasva":0.2,"hh":6.4,"kuitu":0.4,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":326},
+    "viinirypäleet":        {"kcal":67, "proteiini":0.6,"rasva":0.2,"hh":16.0,"kuitu":0.9,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":308},
+    "luumu":                {"kcal":46, "proteiini":0.7,"rasva":0.1,"hh":10.5,"kuitu":1.4,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":320},
+    "kirsikka":             {"kcal":50, "proteiini":1.0,"rasva":0.3,"hh":10.0,"kuitu":1.6,"suola":0.0,"ryhmä":"Hedelmät","fineli_id":306},
+    "karpalo":              {"kcal":29, "proteiini":0.4,"rasva":0.1,"hh":6.3,"kuitu":4.6,"suola":0.0,"ryhmä":"Marjat","fineli_id":329},
+    "tyrni":                {"kcal":82, "proteiini":1.2,"rasva":3.5,"hh":9.5,"kuitu":3.0,"suola":0.0,"ryhmä":"Marjat","fineli_id":334},
+    "herukat punaiset":     {"kcal":36, "proteiini":1.0,"rasva":0.2,"hh":7.0,"kuitu":4.3,"suola":0.0,"ryhmä":"Marjat","fineli_id":332},
+    "mustaherukat":         {"kcal":56, "proteiini":1.3,"rasva":0.4,"hh":11.0,"kuitu":6.8,"suola":0.0,"ryhmä":"Marjat","fineli_id":330},
+    # Pähkinät ja siemenet lisää
+    "saksanpähkinä":        {"kcal":654,"proteiini":15.0,"rasva":65.0,"hh":7.0,"kuitu":6.7,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":824},
+    "pistaasi":             {"kcal":562,"proteiini":20.0,"rasva":45.0,"hh":21.0,"kuitu":10.3,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":827},
+    "hasselpähkinä":        {"kcal":628,"proteiini":15.0,"rasva":61.0,"hh":7.0,"kuitu":9.7,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":823},
+    "maapähkinä":           {"kcal":567,"proteiini":26.0,"rasva":49.0,"hh":9.0,"kuitu":8.5,"suola":0.0,"ryhmä":"Pähkinät","fineli_id":825},
+    "chiasiemen":           {"kcal":486,"proteiini":17.0,"rasva":31.0,"hh":42.0,"kuitu":34.0,"suola":0.0,"ryhmä":"Siemenet","fineli_id":843},
+    "hampunsiemen":         {"kcal":553,"proteiini":32.0,"rasva":49.0,"hh":9.0,"kuitu":4.0,"suola":0.0,"ryhmä":"Siemenet","fineli_id":844},
+    "seesaminsiemen":       {"kcal":573,"proteiini":18.0,"rasva":50.0,"hh":12.0,"kuitu":11.8,"suola":0.0,"ryhmä":"Siemenet","fineli_id":841},
+    "kurpitsansiemen":      {"kcal":559,"proteiini":30.0,"rasva":49.0,"hh":6.0,"kuitu":6.0,"suola":0.0,"ryhmä":"Siemenet","fineli_id":845},
+    # Muut
+    "hunaja":               {"kcal":304,"proteiini":0.3,"rasva":0.0,"hh":83.0,"kuitu":0.0,"suola":0.0,"ryhmä":"Makeutusaineet","fineli_id":900},
+    "vaahterasirappi":      {"kcal":260,"proteiini":0.1,"rasva":0.1,"hh":67.0,"kuitu":0.0,"suola":0.0,"ryhmä":"Makeutusaineet","fineli_id":901},
+    "sokeri":               {"kcal":399,"proteiini":0.0,"rasva":0.0,"hh":99.7,"kuitu":0.0,"suola":0.0,"ryhmä":"Makeutusaineet","fineli_id":902},
+    "kookossokeri":         {"kcal":375,"proteiini":0.5,"rasva":0.2,"hh":93.0,"kuitu":0.0,"suola":0.0,"ryhmä":"Makeutusaineet","fineli_id":903},
+    "tummasuklaa":          {"kcal":546,"proteiini":5.0,"rasva":32.0,"hh":62.0,"kuitu":8.0,"suola":0.1,"ryhmä":"Makeiset","fineli_id":920},
+    "maitosuklaa":          {"kcal":535,"proteiini":7.0,"rasva":30.0,"hh":60.0,"kuitu":2.0,"suola":0.2,"ryhmä":"Makeiset","fineli_id":921},
+    "kahvi jauhettu":       {"kcal":2,  "proteiini":0.2,"rasva":0.1,"hh":0.2,"kuitu":0.0,"suola":0.0,"ryhmä":"Juomat","fineli_id":950},
+    "musta tee":            {"kcal":1,  "proteiini":0.1,"rasva":0.0,"hh":0.2,"kuitu":0.0,"suola":0.0,"ryhmä":"Juomat","fineli_id":955},
+    "appelsiinimehu":       {"kcal":44, "proteiini":0.7,"rasva":0.2,"hh":10.0,"kuitu":0.2,"suola":0.0,"ryhmä":"Juomat","fineli_id":960},
+    "riisimaito":           {"kcal":48, "proteiini":0.3,"rasva":1.0,"hh":9.5,"kuitu":0.2,"suola":0.1,"ryhmä":"Kasvipohjaiset","fineli_id":5603},
+    "kookosmaito":          {"kcal":197,"proteiini":2.0,"rasva":21.0,"hh":2.5,"kuitu":0.0,"suola":0.0,"ryhmä":"Kasvipohjaiset","fineli_id":5605},
+    "mantelimaito":         {"kcal":24, "proteiini":0.5,"rasva":1.5,"hh":2.0,"kuitu":0.3,"suola":0.1,"ryhmä":"Kasvipohjaiset","fineli_id":5604},
+    "tempeh":               {"kcal":193,"proteiini":19.0,"rasva":11.0,"hh":7.5,"kuitu":4.5,"suola":0.0,"ryhmä":"Kasviproteiinit","fineli_id":676},
+    "seitan":               {"kcal":149,"proteiini":25.0,"rasva":2.0,"hh":7.0,"kuitu":0.6,"suola":0.5,"ryhmä":"Kasviproteiinit","fineli_id":677},
+    "soijarouhee":          {"kcal":330,"proteiini":45.0,"rasva":1.0,"hh":30.0,"kuitu":15.0,"suola":0.0,"ryhmä":"Kasviproteiinit","fineli_id":678},
 }
 
 def fineli_search(query: str) -> list:
@@ -463,6 +579,131 @@ def show_fineli_card(fin_data: dict):
 Lähde: <a href='{url}' target='_blank' style='color:#1a5c2a;font-weight:600'>Fineli® THL – {fin_name}</a>
 <span style='color:#888'> · Arvot per 100 g</span></div></div>""", unsafe_allow_html=True)
 
+
+
+# ── KESTÄVYYSPISTEJÄRJESTELMÄ ─────────────────────────────────────────────────
+BADGE_DEFS = [
+    (10,  "🌱 Vihreä aloittaja",       "10 pistettä kerätty!"),
+    (50,  "🌿 Kestävä ostaja",         "50 pistettä – hienoa!"),
+    (100, "🏆 Ekosankari",             "100 pistettä – olet huipulla!"),
+    (200, "🌍 Planeetan puolustaja",   "200 pistettä – legendaarinen!"),
+    (5,   "🔥 5 putki",                "5 peräkkäistä eco A/B-valintaa!"),
+    (10,  "💎 10 putki",               "10 peräkkäistä eco A/B-valintaa!"),
+]
+
+def add_points(reason: str, pts: int, eco_grade: str = ""):
+    """Lisää pisteitä ja tarkistaa uudet saavutukset."""
+    p = st.session_state.points
+    p["total"] = p.get("total", 0) + pts
+    # Putki: eco A tai B
+    if eco_grade.lower() in ["a", "b"]:
+        p["streak"] = p.get("streak", 0) + 1
+    else:
+        p["streak"] = 0
+    # Logi
+    from datetime import datetime
+    p["log"].append({"reason": reason, "pts": pts, "date": datetime.now().strftime("%d.%m.%Y")})
+    # Badget
+    total = p["total"]
+    streak = p["streak"]
+    earned = p.get("badges", [])
+    new_badges = []
+    if total >= 200 and "🌍 Planeetan puolustaja" not in earned:
+        new_badges.append("🌍 Planeetan puolustaja")
+    elif total >= 100 and "🏆 Ekosankari" not in earned:
+        new_badges.append("🏆 Ekosankari")
+    elif total >= 50 and "🌿 Kestävä ostaja" not in earned:
+        new_badges.append("🌿 Kestävä ostaja")
+    elif total >= 10 and "🌱 Vihreä aloittaja" not in earned:
+        new_badges.append("🌱 Vihreä aloittaja")
+    if streak >= 10 and "💎 10 putki" not in earned:
+        new_badges.append("💎 10 putki")
+    elif streak >= 5 and "🔥 5 putki" not in earned:
+        new_badges.append("🔥 5 putki")
+    for b in new_badges:
+        earned.append(b)
+        st.toast(f"🎉 Uusi saavutus: {b}", icon="🏅")
+    p["badges"] = earned
+    save_json(POINTS_FILE, p)
+
+# ── PAKKAUKSEN ARVIOINTI ──────────────────────────────────────────────────────
+def score_packaging(packagings: list) -> tuple[str, str]:
+    """Palauttaa (arvosana, selitys) pakkauksen perusteella."""
+    if not packagings:
+        return "?", "Pakkaustietoa ei saatavilla"
+    materials = []
+    for pkg in packagings:
+        m = (pkg.get("material", {}).get("id") or "").lower()
+        if m:
+            materials.append(m)
+    mat_str = " ".join(materials)
+    if not mat_str:
+        return "?", "Pakkaustietoa ei saatavilla"
+    if "glass" in mat_str or "lasi" in mat_str:
+        return "A", "🟢 Lasi – kierrätettävä ja uudelleenkäytettävä"
+    if "cardboard" in mat_str or "paper" in mat_str or "kartonki" in mat_str:
+        return "B", "🟡 Kartonki/paperi – hyvä valinta"
+    if "metal" in mat_str or "aluminium" in mat_str or "steel" in mat_str:
+        return "B", "🟡 Metalli/alumiini – kierrätettävä"
+    if "plastic" in mat_str or "muovi" in mat_str:
+        if "recycled" in mat_str or "kierrätetty" in mat_str:
+            return "C", "🟠 Kierrätetty muovi – parempi kuin neitseellinen"
+        return "D", "🔴 Muovi – harkitse lasivaihtoehtoa"
+    return "C", "🟠 Sekamateriaali"
+
+# ── ALKUPERÄMAA ───────────────────────────────────────────────────────────────
+COUNTRY_FLAGS = {
+    "en:finland": "🇫🇮 Suomi", "en:sweden": "🇸🇪 Ruotsi",
+    "en:norway": "🇳🇴 Norja", "en:denmark": "🇩🇰 Tanska",
+    "en:germany": "🇩🇪 Saksa", "en:france": "🇫🇷 Ranska",
+    "en:italy": "🇮🇹 Italia", "en:spain": "🇪🇸 Espanja",
+    "en:netherlands": "🇳🇱 Alankomaat", "en:united-kingdom": "🇬🇧 Britannia",
+    "en:united-states": "🇺🇸 USA", "en:poland": "🇵🇱 Puola",
+    "en:estonia": "🇪🇪 Viro", "en:latvia": "🇱🇻 Latvia",
+    "en:lithuania": "🇱🇹 Liettua", "en:belgium": "🇧🇪 Belgia",
+    "en:austria": "🇦🇹 Itävalta", "en:switzerland": "🇨🇭 Sveitsi",
+}
+
+def get_origin(countries_tags: list) -> str:
+    if not countries_tags:
+        return "🌐 Alkuperä tuntematon"
+    for tag in countries_tags:
+        if tag in COUNTRY_FLAGS:
+            return COUNTRY_FLAGS[tag]
+    return f"🌐 {countries_tags[0].replace('en:','').title()}"
+
+def origin_color(countries_tags: list) -> str:
+    tags = set(countries_tags or [])
+    if "en:finland" in tags:
+        return "#d4edda"
+    if tags & {"en:sweden","en:norway","en:denmark","en:estonia"}:
+        return "#e8f4fd"
+    return "#fff8e1"
+
+# ── CO₂-LASKIN OSTOSKORILLE ───────────────────────────────────────────────────
+# kg CO₂ per kg tuotetta (arviot)
+CO2_BY_CATEGORY = {
+    "beef": 27.0, "lamb": 39.0, "pork": 12.0, "chicken": 6.9,
+    "turkey": 10.9, "fish": 6.1, "salmon": 11.9,
+    "milk": 3.2, "cheese": 13.5, "butter": 23.8, "yogurt": 2.2,
+    "eggs": 4.8, "tofu": 3.0, "nuts": 2.3, "legumes": 0.9,
+    "rice": 4.0, "pasta": 1.7, "bread": 1.1, "oats": 1.5,
+    "vegetables": 0.4, "fruits": 0.5, "potatoes": 0.3,
+    "oil": 6.0, "sugar": 1.5, "chocolate": 19.0, "coffee": 28.5,
+}
+
+def estimate_co2(product: dict, weight_g: float = 100) -> float:
+    """Arvioi tuotteen CO₂ per annettu paino grammoissa."""
+    # Käytä ensin OFF:n omaa dataa
+    known = product.get("carbon_footprint_from_known_ingredients_100g")
+    if known:
+        return float(known) * weight_g / 100
+    # Arvioi kategorian perusteella
+    cats = " ".join(product.get("categories_tags") or []).lower()
+    for cat, co2 in CO2_BY_CATEGORY.items():
+        if cat in cats:
+            return co2 * weight_g / 100 / 10  # kg→g, per 100g
+    return 1.5 * weight_g / 100  # oletusarvo
 
 # ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
@@ -604,6 +845,22 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         for l in labels:
             st.markdown(f"✅ **{l.replace('en:','').replace('fi:','').replace('-',' ').title()}**")
 
+    # Alkuperämaa
+    ctags = product.get("countries_tags") or []
+    if ctags:
+        origin = get_origin(ctags)
+        bg = origin_color(ctags)
+        st.markdown(f"""<div style='background:{bg};border-radius:8px;padding:10px 16px;margin:8px 0;display:inline-block'>
+<span style='font-size:1.05em'>🌐 <b>Alkuperämaa:</b> {origin}</span></div>""", unsafe_allow_html=True)
+
+    # Pakkauksen arviointi
+    packagings = product.get("packagings") or []
+    if packagings:
+        pkg_grade, pkg_text = score_packaging(packagings)
+        pkg_colors = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
+        st.markdown(f"""<div style='background:{pkg_colors.get(pkg_grade,"#f0f0f0")};border-radius:8px;padding:10px 16px;margin:8px 0'>
+<b>📦 Pakkauksen arvosana: {pkg_grade}</b> – {pkg_text}</div>""", unsafe_allow_html=True)
+
     # Lisää ostoslistalle
     st.markdown("---")
     col_a, col_b, col_c = st.columns(3)
@@ -617,10 +874,28 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
             item = {
                 "name": name, "brand": brand, "eco": eco, "nutri": nutri, "nova": nova,
                 "carbon": carbon, "qty": qty, "price": price,
-                "date": datetime.now().strftime("%Y-%m-%d")
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "countries_tags": product.get("countries_tags", []),
             }
             st.session_state.shopping.append(item)
             save_json(SHOPPING_FILE, st.session_state.shopping)
+            # ── Kestävyyspisteet ──────────────────────────────────────────────
+            _eco = str(eco).lower()
+            _nova = nova
+            _cats = " ".join(product.get("categories_tags") or []).lower()
+            _ctags = set(product.get("countries_tags") or [])
+            pts = 0; reasons = []
+            if _eco in ["a","b"]:
+                pts += 3; reasons.append(f"Eco {_eco.upper()}")
+            if any(k in _cats for k in ["plant","vegan","vegetable","legume","fruit","oat","soy","berry"]):
+                pts += 2; reasons.append("kasvistuote")
+            if _nova and str(_nova) in ["1","2"]:
+                pts += 1; reasons.append(f"NOVA {_nova}")
+            if "en:finland" in _ctags:
+                pts += 2; reasons.append("kotimainen 🇫🇮")
+            if pts > 0:
+                add_points(", ".join(reasons), pts, _eco)
+                st.toast(f"🌱 +{pts} pistettä! ({', '.join(reasons)})", icon="🏆")
             st.success(f"✅ {name} lisätty ostoslistalle!")
 
     if st.button("📦 Lisää kaappitavaroihin (hävikinseuranta)", key=f"waste_{name[:15]}"):
@@ -677,9 +952,10 @@ def show_product_card(p: dict):
             if img:
                 st.image(img, width=65)
         with c2:
+            origin_txt = get_origin(p.get("countries_tags") or [])
             st.markdown(f"{country_flag}**{name}**")
             if brand:
-                st.caption(brand)
+                st.caption(f"{brand} · {origin_txt}")
             st.markdown(
                 f"{eco_col} Eco: **{str(eco).upper()}** &nbsp;|&nbsp; 🥗 Nutri: **{str(nutri).upper()}** &nbsp;|&nbsp; ⚙️ NOVA: **{nova or '?'}**",
                 unsafe_allow_html=True)
@@ -702,10 +978,23 @@ with st.sidebar:
         "📷 Viivakoodihaku",
         "🛒 Ostoslista",
         "🗑️ Hävikinseuranta",
+        "🗓️ Ateriasuunnittelija",
+        "🏆 Kestävyyspisteet",
+        "🔔 Parasta ennen",
         "📈 Tilastot",
         "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
+    st.markdown("---")
+    # Pistewidget sivupalkissa
+    _pts = st.session_state.points.get("total", 0)
+    _streak = st.session_state.points.get("streak", 0)
+    _badges = st.session_state.points.get("badges", [])
+    st.markdown(f"""<div style='background:#d4edda;border-radius:8px;padding:8px 12px;text-align:center'>
+<div style='font-weight:700;color:#1a5c2a'>🏆 {_pts} pistettä</div>
+{"<div style='font-size:0.8em;color:#4a8c5c'>🔥 " + str(_streak) + " putki</div>" if _streak > 1 else ""}
+{"<div style='font-size:0.75em'>" + " ".join(_badges[-2:]) + "</div>" if _badges else ""}
+</div>""", unsafe_allow_html=True)
     st.markdown("---")
     st.markdown("**Tietolähteet:**")
     st.markdown("- [Open Food Facts](https://world.openfoodfacts.org) (CC-BY-SA)")
@@ -805,6 +1094,23 @@ elif "Ostoslista" in page:
     if not st.session_state.shopping:
         st.info("Ostoslista on tyhjä. Lisää tuotteita hakemalla ja avaamalla tuotetiedot.")
     else:
+        # CO₂-yhteenveto
+        total_co2 = sum(float(item.get("carbon") or 0) * int(item.get("qty",1)) for item in st.session_state.shopping)
+        total_price = sum(float(item.get("price") or 0) * int(item.get("qty",1)) for item in st.session_state.shopping)
+        km_eq = round(total_co2 / 0.21, 1) if total_co2 > 0 else 0
+        eco_good = sum(1 for i in st.session_state.shopping if str(i.get("eco","")).lower() in ["a","b"])
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            st.metric("🌍 CO₂ yhteensä", f"{total_co2:.0f} g")
+            if km_eq > 0:
+                st.caption(f"≈ {km_eq} km autolla")
+        with mc2:
+            st.metric("💶 Hinta yhteensä", f"{total_price:.2f} €")
+        with mc3:
+            st.metric("🌿 Eco A/B tuotteet", f"{eco_good}/{len(st.session_state.shopping)}")
+        with mc4:
+            st.metric("🏆 Pisteet", st.session_state.points.get("total",0))
+        st.markdown("---")
         df = pd.DataFrame(st.session_state.shopping)
 
         # Yhteenvedot
@@ -979,6 +1285,265 @@ elif "Tilastot" in page:
             st.success("👍 Hyvää työtä! Yli puolet ostoksistasi on kestäviä valintoja.")
         else:
             st.info("💡 Pienilläkin muutoksilla voit parantaa ympäristövaikutustasi. Kokeile etsiä A/B-vaihtoehtoja!")
+
+
+# ── 8. ATERIASUUNNITTELIJA ────────────────────────────────────────────────────
+elif "Ateriasuunnittelija" in page:
+    st.title("🗓️ Ateriasuunnittelija")
+    st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
+
+    DAYS = ["Maanantai","Tiistai","Keskiviikko","Torstai","Perjantai","Lauantai","Sunnuntai"]
+    MEALS = ["Aamupala","Lounas","Päivällinen","Välipala"]
+
+    if not isinstance(st.session_state.mealplan, dict):
+        st.session_state.mealplan = {}
+
+    # Päivän valinta
+    sel_day = st.selectbox("Valitse päivä", DAYS)
+    sel_meal = st.selectbox("Ateria", MEALS)
+
+    # Hae tuote lisättäväksi
+    st.markdown("#### ➕ Lisää tuote aterialle")
+    mp_q = st.text_input("Hae tuotetta tai kirjoita nimi", placeholder="esim. kauramaito, ruisleipä...")
+    if mp_q:
+        fin_hits = fineli_search(mp_q)
+        if fin_hits:
+            st.caption(f"Fineli-tietokanta: {len(fin_hits)} osumaa")
+            for hit in fin_hits:
+                col1, col2 = st.columns([4,1])
+                with col1:
+                    st.markdown(f"**{hit['name'].title()}** – {hit['kcal']} kcal / 100 g · {hit.get('ryhmä','')}")
+                with col2:
+                    if st.button("➕", key=f"mp_{sel_day}_{sel_meal}_{hit['name']}"):
+                        key = f"{sel_day}_{sel_meal}"
+                        if key not in st.session_state.mealplan:
+                            st.session_state.mealplan[key] = []
+                        st.session_state.mealplan[key].append({
+                            "name": hit["name"].title(),
+                            "kcal": hit.get("kcal", 0),
+                            "proteiini": hit.get("proteiini", 0),
+                            "rasva": hit.get("rasva", 0),
+                            "hh": hit.get("hh", 0),
+                            "kuitu": hit.get("kuitu", 0),
+                            "ryhmä": hit.get("ryhmä", ""),
+                            "g": 100,
+                        })
+                        save_json(MEALPLAN_FILE, st.session_state.mealplan)
+                        st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📅 Viikon suunnitelma")
+
+    total_week_kcal = 0
+    total_week_co2 = 0.0
+
+    for day in DAYS:
+        has_any = any(f"{day}_{m}" in st.session_state.mealplan for m in MEALS)
+        with st.expander(f"**{day}**" + (" ✅" if has_any else ""), expanded=(day == sel_day)):
+            day_kcal = 0
+            for meal in MEALS:
+                key = f"{day}_{meal}"
+                items = st.session_state.mealplan.get(key, [])
+                if items:
+                    st.markdown(f"**{meal}:**")
+                    for i, item in enumerate(items):
+                        c1, c2, c3 = st.columns([3, 2, 1])
+                        with c1:
+                            g = st.number_input(f"{item['name']}", 10, 1000, item.get("g",100), step=10,
+                                key=f"g_{day}_{meal}_{i}")
+                            item["g"] = g
+                        with c2:
+                            kcal_portion = round(item.get("kcal",0) * g / 100)
+                            st.caption(f"≈ {kcal_portion} kcal · {item.get('ryhmä','')}")
+                            day_kcal += kcal_portion
+                        with c3:
+                            if st.button("🗑️", key=f"del_{day}_{meal}_{i}"):
+                                st.session_state.mealplan[key].pop(i)
+                                save_json(MEALPLAN_FILE, st.session_state.mealplan)
+                                st.rerun()
+                else:
+                    st.caption(f"{meal}: –")
+            if day_kcal > 0:
+                st.markdown(f"**Päivän kalorit yhteensä: {day_kcal} kcal**")
+            total_week_kcal += day_kcal
+
+    st.markdown("---")
+    st.markdown("### 📊 Viikon yhteenveto")
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        st.metric("🔥 Kalorit viikossa", f"{total_week_kcal} kcal")
+        st.caption(f"≈ {round(total_week_kcal/7)} kcal/pv")
+    with s2:
+        items_count = sum(len(v) for v in st.session_state.mealplan.values())
+        st.metric("🍽️ Aterioita suunniteltu", items_count)
+    with s3:
+        if st.button("🗑️ Tyhjennä koko viikko"):
+            st.session_state.mealplan = {}
+            save_json(MEALPLAN_FILE, {})
+            st.rerun()
+
+    if total_week_kcal > 0:
+        st.info(f"💡 Suunnittelu vähentää ruokahävikkiä jopa 30 % – hienoa että suunnittelet etukäteen! 🌱")
+
+# ── 9. KESTÄVYYSPISTEET ───────────────────────────────────────────────────────
+elif "Kestävyyspisteet" in page:
+    st.title("🏆 Kestävyyspisteet & saavutukset")
+    st.markdown("Kerää pisteitä tekemällä kestäviä ruokavalintoja!")
+
+    p = st.session_state.points
+    total = p.get("total", 0)
+    streak = p.get("streak", 0)
+    badges = p.get("badges", [])
+    log = p.get("log", [])
+
+    # Pisteet isona
+    st.markdown(f"""
+<div style='background:linear-gradient(135deg,#1a5c2a,#2d8a47);border-radius:16px;padding:24px;text-align:center;color:white;margin-bottom:16px'>
+<div style='font-size:3em;font-weight:800'>{total}</div>
+<div style='font-size:1.1em;opacity:0.9'>Kestävyyspistettä</div>
+<div style='margin-top:8px;font-size:0.9em;opacity:0.8'>🔥 Putki: {streak} peräkkäistä Eco A/B-valintaa</div>
+</div>""", unsafe_allow_html=True)
+
+    # Seuraava taso
+    levels = [(10,"🌱 Vihreä aloittaja"),(50,"🌿 Kestävä ostaja"),(100,"🏆 Ekosankari"),(200,"🌍 Planeetan puolustaja")]
+    next_lvl = next((pts for pts, _ in levels if pts > total), None)
+    if next_lvl:
+        progress = min(total / next_lvl, 1.0)
+        st.markdown(f"**Seuraava taso: {next_lvl} pistettä**")
+        st.progress(progress)
+        st.caption(f"{next_lvl - total} pistettä puuttuu")
+
+    st.markdown("---")
+
+    # Saavutukset
+    st.markdown("### 🎖️ Saavutukset")
+    ALL_BADGES = [
+        ("🌱 Vihreä aloittaja", "10 pistettä"),
+        ("🌿 Kestävä ostaja", "50 pistettä"),
+        ("🏆 Ekosankari", "100 pistettä"),
+        ("🌍 Planeetan puolustaja", "200 pistettä"),
+        ("🔥 5 putki", "5 Eco A/B peräkkäin"),
+        ("💎 10 putki", "10 Eco A/B peräkkäin"),
+    ]
+    badge_cols = st.columns(3)
+    for i, (badge, desc) in enumerate(ALL_BADGES):
+        earned = badge in badges
+        with badge_cols[i % 3]:
+            bg = "#d4edda" if earned else "#f0f0f0"
+            opacity = "1" if earned else "0.4"
+            st.markdown(f"""<div style='background:{bg};border-radius:10px;padding:12px;text-align:center;opacity:{opacity};margin-bottom:8px'>
+<div style='font-size:1.8em'>{badge.split()[0]}</div>
+<div style='font-weight:600;font-size:0.85em'>{' '.join(badge.split()[1:])}</div>
+<div style='font-size:0.75em;color:#555'>{desc}</div>
+{"<div style='color:#1a5c2a;font-weight:700;font-size:0.8em'>✅ Ansaittu!</div>" if earned else ""}
+</div>""", unsafe_allow_html=True)
+
+    # Pisteiden miten saa -ohje
+    st.markdown("---")
+    st.markdown("### 📋 Miten pisteitä kertyy?")
+    st.markdown("""
+| Teko | Pisteet |
+|---|---|
+| Eco A tai B -tuote ostoslistalle | +3 |
+| Kasvis- tai vegaanituote | +2 |
+| Kotimainen tuote 🇫🇮 | +2 |
+| NOVA 1 tai 2 -tuote | +1 |
+""")
+
+    # Lokihistoria
+    if log:
+        st.markdown("---")
+        st.markdown("### 📜 Pisteloki")
+        for entry in reversed(log[-20:]):
+            st.caption(f"🌱 +{entry.get('pts',0)} – {entry.get('reason','')} ({entry.get('date','')})")
+
+    if st.button("🗑️ Nollaa pisteet"):
+        st.session_state.points = {"total":0,"streak":0,"log":[],"badges":[]}
+        save_json(POINTS_FILE, st.session_state.points)
+        st.rerun()
+
+# ── 10. PARASTA ENNEN -HÄLYTYKSET ─────────────────────────────────────────────
+elif "Parasta ennen" in page:
+    st.title("🔔 Parasta ennen -hälytykset")
+    st.markdown("Lisää kotona olevat tuotteet listalle – sovellus varoittaa kun päiväys lähestyy ja ehdottaa reseptejä.")
+
+    from datetime import date, timedelta
+
+    # Lisää uusi tuote
+    st.markdown("### ➕ Lisää tuote kaappilistaan")
+    c1, c2, c3 = st.columns([3, 2, 1])
+    with c1:
+        exp_name = st.text_input("Tuotteen nimi", placeholder="esim. Jogurtti, Lohi, Pinaatti...")
+    with c2:
+        exp_date = st.date_input("Parasta ennen", value=date.today() + timedelta(days=7), min_value=date.today())
+    with c3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("➕ Lisää") and exp_name:
+            entry = {
+                "name": exp_name,
+                "expiry": exp_date.strftime("%Y-%m-%d"),
+                "added": date.today().strftime("%Y-%m-%d"),
+            }
+            if not isinstance(st.session_state.expiry, list):
+                st.session_state.expiry = []
+            st.session_state.expiry.append(entry)
+            save_json(EXPIRY_FILE, st.session_state.expiry)
+            st.success(f"✅ {exp_name} lisätty!")
+            st.rerun()
+
+    st.markdown("---")
+
+    if not st.session_state.expiry:
+        st.info("Kaappilista on tyhjä. Lisää tuotteita yllä olevalla lomakkeella.")
+    else:
+        today = date.today()
+        expired, urgent, ok = [], [], []
+        for item in st.session_state.expiry:
+            try:
+                d = date.fromisoformat(item["expiry"])
+                diff = (d - today).days
+                item["_days"] = diff
+                if diff < 0:      expired.append(item)
+                elif diff <= 2:   urgent.append(item)
+                else:             ok.append(item)
+            except:
+                ok.append(item)
+
+        def show_expiry_items(items, bg, icon):
+            for i, item in enumerate(items):
+                d = item.get("_days", "?")
+                label = "Vanhentunut!" if isinstance(d,int) and d < 0 else (f"Vanhenee tänään!" if d == 0 else f"Vanhenee {d} päivässä")
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+                with c1: st.markdown(f"**{item['name']}**")
+                with c2: st.caption(f"📅 {item['expiry']}")
+                with c3:
+                    st.markdown(f"<span style='background:{bg};padding:2px 8px;border-radius:4px;font-size:0.85em'>{icon} {label}</span>", unsafe_allow_html=True)
+                with c4:
+                    if st.button("🗑️", key=f"exp_del_{item['name']}_{i}"):
+                        st.session_state.expiry.remove(item)
+                        save_json(EXPIRY_FILE, st.session_state.expiry)
+                        st.rerun()
+                # Reseptiehdotus
+                term = requests.utils.quote(item["name"].split()[0])
+                st.caption(f"🍽️ Resepti-idea: [Kotikokki]( https://www.kotikokki.net/reseptit/haku/?search={term}) · [K-Ruoka](https://www.k-ruoka.fi/reseptit?search={term})")
+
+        if expired:
+            st.error(f"❌ Vanhentuneita tuotteita: {len(expired)}")
+            show_expiry_items(expired, "#f8d7da", "❌")
+            st.markdown("---")
+        if urgent:
+            st.warning(f"⚠️ Pian vanhentuvia (0–2 pv): {len(urgent)}")
+            show_expiry_items(urgent, "#fff3cd", "⚠️")
+            st.markdown("---")
+        if ok:
+            st.success(f"✅ Hyväkuntoisia tuotteita: {len(ok)}")
+            show_expiry_items(ok, "#d4edda", "✅")
+
+        st.markdown("---")
+        if st.button("🗑️ Tyhjennä koko kaappilista"):
+            st.session_state.expiry = []
+            save_json(EXPIRY_FILE, [])
+            st.rerun()
 
 # ── 7. FINELI-RAVINTOHAKU ─────────────────────────────────────────────────────
 elif "Fineli" in page:
