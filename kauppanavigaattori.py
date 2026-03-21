@@ -118,7 +118,6 @@ SHOPPING_FILE  = "ostoslista.json"
 WASTE_FILE     = "kaappitavarat.json"
 MEALPLAN_FILE  = "ateriasuunnitelma.json"
 POINTS_FILE    = "kestävyyspisteet.json"
-EXPIRY_FILE    = "kaappitavarat_pvm.json"
 
 def load_json(path):
     if os.path.exists(path):
@@ -136,7 +135,6 @@ for key, file in [
     ("waste",    WASTE_FILE),
     ("mealplan", MEALPLAN_FILE),
     ("points",   POINTS_FILE),
-    ("expiry",   EXPIRY_FILE),
 ]:
     if key not in st.session_state:
         st.session_state[key] = load_json(file)
@@ -272,35 +270,42 @@ def search_products(query: str) -> list:
 
     results = []
 
-    # Vaihe 1: Hae suomalaiset tuotteet englanninkäännöksellä
-    results = fetch_with_country(search_term, "finland")
+    # Vaihe 1: Hae suomenkielisellä hakusanalla, Suomi-filtteri
+    results = fetch_with_country(query, "finland")
 
-    # Vaihe 2: Jos ei tuloksia, kokeile alkuperäisellä hakusanalla
-    if len(results) < 2 and use_en:
-        r2 = fetch_with_country(query, "finland")
+    # Vaihe 2: Jos vähän tuloksia, hae myös englanninkäännöksellä
+    if len(results) < 3 and use_en:
+        r2 = fetch_with_country(search_term, "finland")
         codes = {p.get("code") for p in results}
         results += [p for p in r2 if p.get("code") not in codes]
 
-    # Vaihe 3: Laajenna pohjoismaisiin (Ruotsi, Norja, Tanska, Viro)
-    if len(results) < 2:
-        for country in ["sweden", "norway", "denmark", "estonia"]:
-            r_nordic = fetch_with_country(search_term, country)
+    # Vaihe 3: Hae kauppakohtaisilla tageilla (Kesko, S-ryhmä, Lidl FI)
+    if len(results) < 3:
+        for store_tag in ["en:k-ruoka", "en:s-market", "en:prisma", "en:lidl-finland",
+                          "en:alepa", "en:k-citymarket", "en:k-market"]:
+            data = _fetch(f"{OFF}/cgi/search.pl", {
+                "search_terms": search_term,
+                "tagtype_0": "stores",
+                "tag_contains_0": "contains",
+                "tag_0": store_tag,
+                "search_simple": 1, "action": "process",
+                "json": 1, "page_size": 20,
+                "fields": FIELDS_SEARCH, "sort_by": "unique_scans_n",
+            })
+            r3 = (data or {}).get("products", [])
             codes = {p.get("code") for p in results}
-            results += [p for p in r_nordic if p.get("code") not in codes]
-            if len(results) >= 4:
+            results += [p for p in r3 if p.get("code") not in codes]
+            if len(results) >= 8:
                 break
 
-    # Vaihe 4: Viimeinen vaihtoehto – hae ilman filtteriä mutta
-    # suodata tiukasti: pidä VAIN pohjoismaiset tai nimetyt tuotteet
+    # Vaihe 4: Viimeinen vaihtoehto – hae ilman filtteriä,
+    # pidä VAIN tuotteet joilla on Suomi countries_tagin tai fi-kieliset nimet
     if len(results) < 2:
         data = _fetch(f"{OFF}/cgi/search.pl", {
             "search_terms": search_term,
-            "search_simple": 1,
-            "action": "process",
-            "json": 1,
-            "page_size": 50,
-            "fields": FIELDS_SEARCH,
-            "sort_by": "unique_scans_n",
+            "search_simple": 1, "action": "process",
+            "json": 1, "page_size": 50,
+            "fields": FIELDS_SEARCH, "sort_by": "unique_scans_n",
         })
         all_results = (data or {}).get("products", [])
         codes = {p.get("code") for p in results}
@@ -308,7 +313,9 @@ def search_products(query: str) -> list:
             if p.get("code") in codes:
                 continue
             ctags = set(p.get("countries_tags") or [])
-            if ctags & NORDIC_COUNTRIES:
+            langs = set(p.get("languages_codes") or {})
+            name_fi = p.get("product_name_fi", "")
+            if "en:finland" in ctags or "fi:suomi" in ctags or "fi" in langs or name_fi:
                 results.append(p)
 
     # Poista tuotteet ilman nimeä ja järjestä pistemäärän mukaan
@@ -826,16 +833,84 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
     # Pakkaus
     packagings = product.get("packagings", [])
     if packagings:
+        # Käännöstaulukot: EN/tag → suomi
+        MAT_FI = {
+            "plastic": "Muovi", "pp": "Polypropeeni (PP)", "pet": "PET-muovi",
+            "pe": "Polyeteeni (PE)", "hdpe": "HDPE-muovi", "ldpe": "LDPE-muovi",
+            "pvc": "PVC-muovi", "ps": "Polystyreeni",
+            "glass": "Lasi", "cardboard": "Kartonki", "paper": "Paperi",
+            "paperboard": "Kartonki", "corrugated-cardboard": "Aaltopahvi",
+            "metal": "Metalli", "aluminium": "Alumiini", "steel": "Teräs",
+            "tin": "Tina", "iron": "Rauta",
+            "wood": "Puu", "ceramic": "Keraami",
+            "bioplastic": "Biomuovi", "compostable-plastic": "Kompostoituva muovi",
+            "recycled-plastic": "Kierrätetty muovi",
+            "recycled-cardboard": "Kierrätetty kartonki",
+            "kraft-paper": "Kraftpaperi", "wax-paper": "Vahapaperi",
+            "multilayer": "Monikerros", "tetra-pak": "Tetra Pak",
+        }
+        SHAPE_FI = {
+            "bottle": "Pullo", "can": "Tölkki", "box": "Laatikko",
+            "bag": "Pussi", "pouch": "Pussi", "jar": "Purkki",
+            "tray": "Aluslevy", "tube": "Tuubi", "carton": "Kartonkipakkaus",
+            "wrap": "Kääre", "film": "Kalvo", "lid": "Kansi",
+            "cap": "Korkki", "sleeve": "Holkki", "packet": "Paketti",
+            "cup": "Kuppi", "container": "Astia", "sachet": "Pussukka",
+            "tetra-pak": "Tetra Pak", "blister": "Läpipainopakkaus",
+        }
+        REC_FI = {
+            "recycle": "Kierrätetään", "recyclable": "Kierrätettävissä",
+            "do-not-recycle": "Ei kierrätetä", "compost": "Kompostoidaan",
+            "reuse": "Uudelleenkäytettävä",
+            "recycle-in-dedicated-bin": "Kierrätyspisteeseen",
+            "recycle-as-plastic": "Muovijätteeseen",
+            "recycle-as-paper": "Paperijätteeseen",
+            "recycle-as-glass": "Lasijätteeseen",
+            "recycle-as-metal": "Metallijätteeseen",
+        }
+
+        def _translate(val, table):
+            """Muuntaa koodin (en:plastic tai plastic) luettavaksi tekstiksi."""
+            if not val:
+                return ""
+            if isinstance(val, dict):
+                # Kokeile suomenkielistä ensin, sitten englantia
+                raw = val.get("fi") or val.get("en") or val.get("id") or ""
+            else:
+                raw = str(val)
+            # Poista etuliitteet kuten "en:", "fi:"
+            clean = raw.lower().replace("en:", "").replace("fi:", "").strip()
+            # Tarkista suoraan käännöstaulusta
+            if clean in table:
+                return table[clean]
+            # Tarkista osuman perusteella
+            for key, translation in table.items():
+                if key in clean:
+                    return translation
+            # Palauta siistiytynä versio raakatekstistä
+            return clean.replace("-", " ").replace("_", " ").title()
+
         st.markdown("### 📦 Pakkausmateriaalit")
-        for p in packagings:
-            m = p.get("material", {})
-            mat = m.get("en", "") if isinstance(m, dict) else str(m)
-            s = p.get("shape", {})
-            shape = s.get("en", "") if isinstance(s, dict) else str(s)
-            r = p.get("recycling", {})
-            rec = r.get("en", "") if isinstance(r, dict) else str(r)
-            if mat or shape:
-                st.markdown(f"- **{shape}**: {mat} — ♻️ {rec or 'Kierrätystieto puuttuu'}")
+        pkg_grade, pkg_text = score_packaging(packagings)
+        pkg_colors = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
+        st.markdown(
+            f"<div style='background:{pkg_colors.get(pkg_grade,"#f0f0f0")};border-radius:8px;"
+            f"padding:8px 14px;margin-bottom:8px;display:inline-block'>"
+            f"<b>Arvosana: {pkg_grade}</b> – {pkg_text}</div>",
+            unsafe_allow_html=True
+        )
+        for pkg in packagings:
+            mat   = _translate(pkg.get("material"),  MAT_FI)
+            shape = _translate(pkg.get("shape"),     SHAPE_FI)
+            rec   = _translate(pkg.get("recycling"), REC_FI)
+            qty   = pkg.get("quantity_per_unit") or ""
+            label_parts = []
+            if shape: label_parts.append(f"**{shape}**")
+            if mat:   label_parts.append(mat)
+            if qty:   label_parts.append(f"({qty})")
+            if label_parts:
+                rec_txt = f"♻️ {rec}" if rec else "♻️ Kierrätystieto puuttuu"
+                st.markdown(f"- {' – '.join(label_parts)} → {rec_txt}")
 
     # Sertifikaatit
     labels = [l for l in product.get("labels_tags", [])
@@ -980,7 +1055,6 @@ with st.sidebar:
         "🗑️ Hävikinseuranta",
         "🗓️ Ateriasuunnittelija",
         "🏆 Kestävyyspisteet",
-        "🔔 Parasta ennen",
         "📈 Tilastot",
         "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
@@ -1461,89 +1535,6 @@ elif "Kestävyyspisteet" in page:
         st.session_state.points = {"total":0,"streak":0,"log":[],"badges":[]}
         save_json(POINTS_FILE, st.session_state.points)
         st.rerun()
-
-# ── 10. PARASTA ENNEN -HÄLYTYKSET ─────────────────────────────────────────────
-elif "Parasta ennen" in page:
-    st.title("🔔 Parasta ennen -hälytykset")
-    st.markdown("Lisää kotona olevat tuotteet listalle – sovellus varoittaa kun päiväys lähestyy ja ehdottaa reseptejä.")
-
-    from datetime import date, timedelta
-
-    # Lisää uusi tuote
-    st.markdown("### ➕ Lisää tuote kaappilistaan")
-    c1, c2, c3 = st.columns([3, 2, 1])
-    with c1:
-        exp_name = st.text_input("Tuotteen nimi", placeholder="esim. Jogurtti, Lohi, Pinaatti...")
-    with c2:
-        exp_date = st.date_input("Parasta ennen", value=date.today() + timedelta(days=7), min_value=date.today())
-    with c3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("➕ Lisää") and exp_name:
-            entry = {
-                "name": exp_name,
-                "expiry": exp_date.strftime("%Y-%m-%d"),
-                "added": date.today().strftime("%Y-%m-%d"),
-            }
-            if not isinstance(st.session_state.expiry, list):
-                st.session_state.expiry = []
-            st.session_state.expiry.append(entry)
-            save_json(EXPIRY_FILE, st.session_state.expiry)
-            st.success(f"✅ {exp_name} lisätty!")
-            st.rerun()
-
-    st.markdown("---")
-
-    if not st.session_state.expiry:
-        st.info("Kaappilista on tyhjä. Lisää tuotteita yllä olevalla lomakkeella.")
-    else:
-        today = date.today()
-        expired, urgent, ok = [], [], []
-        for item in st.session_state.expiry:
-            try:
-                d = date.fromisoformat(item["expiry"])
-                diff = (d - today).days
-                item["_days"] = diff
-                if diff < 0:      expired.append(item)
-                elif diff <= 2:   urgent.append(item)
-                else:             ok.append(item)
-            except:
-                ok.append(item)
-
-        def show_expiry_items(items, bg, icon):
-            for i, item in enumerate(items):
-                d = item.get("_days", "?")
-                label = "Vanhentunut!" if isinstance(d,int) and d < 0 else (f"Vanhenee tänään!" if d == 0 else f"Vanhenee {d} päivässä")
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                with c1: st.markdown(f"**{item['name']}**")
-                with c2: st.caption(f"📅 {item['expiry']}")
-                with c3:
-                    st.markdown(f"<span style='background:{bg};padding:2px 8px;border-radius:4px;font-size:0.85em'>{icon} {label}</span>", unsafe_allow_html=True)
-                with c4:
-                    if st.button("🗑️", key=f"exp_del_{item['name']}_{i}"):
-                        st.session_state.expiry.remove(item)
-                        save_json(EXPIRY_FILE, st.session_state.expiry)
-                        st.rerun()
-                # Reseptiehdotus
-                term = requests.utils.quote(item["name"].split()[0])
-                st.caption(f"🍽️ Resepti-idea: [Kotikokki]( https://www.kotikokki.net/reseptit/haku/?search={term}) · [K-Ruoka](https://www.k-ruoka.fi/reseptit?search={term})")
-
-        if expired:
-            st.error(f"❌ Vanhentuneita tuotteita: {len(expired)}")
-            show_expiry_items(expired, "#f8d7da", "❌")
-            st.markdown("---")
-        if urgent:
-            st.warning(f"⚠️ Pian vanhentuvia (0–2 pv): {len(urgent)}")
-            show_expiry_items(urgent, "#fff3cd", "⚠️")
-            st.markdown("---")
-        if ok:
-            st.success(f"✅ Hyväkuntoisia tuotteita: {len(ok)}")
-            show_expiry_items(ok, "#d4edda", "✅")
-
-        st.markdown("---")
-        if st.button("🗑️ Tyhjennä koko kaappilista"):
-            st.session_state.expiry = []
-            save_json(EXPIRY_FILE, [])
-            st.rerun()
 
 # ── 7. FINELI-RAVINTOHAKU ─────────────────────────────────────────────────────
 elif "Fineli" in page:
