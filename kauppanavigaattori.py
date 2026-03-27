@@ -239,88 +239,107 @@ def _score_product(product: dict, query: str) -> int:
 def _is_relevant(product: dict, query: str) -> bool:
     return _score_product(product, query) > 0
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def search_products(query: str) -> list:
-    """
-    Hakee VAIN suomalaisia ja pohjoismaisia tuotteita.
-    1. Yrittää ensin hakea Suomi-filtterillä + englanninkäännöksellä
-    2. Jos alle 2 tulosta, yrittää pohjoismaisella filtterillä
-    3. Jos edelleen tyhjä, yrittää ilman filtteriä mutta suodattaa
-       tiukasti vain pohjoismaiset tulokset
-    """
+    """Hakee VAIN Suomessa myynnissä olevia tuotteita Open Food Facts -tietokannasta."""
     en_query = _translate_query(query)
-    use_en = en_query.lower() != query.lower()
-    search_term = en_query if use_en else query
+    use_en   = en_query.lower() != query.lower()
+    en_term  = en_query if use_en else query
 
-    def fetch_with_country(term, country_tag, page_size=24):
-        """Haku country-tagilla OFF:n tagihaku-API:lla."""
-        data = _fetch(f"{OFF}/cgi/search.pl", {
+    FINLAND_TAG = "en:finland"
+    FIELDS = FIELDS_SEARCH + ",languages_codes,product_name_fi"
+
+    def cgi_search(term, extra_params=None):
+        params = {
             "search_terms": term,
-            "tagtype_0": "countries",
-            "tag_contains_0": "contains",
-            "tag_0": country_tag,
             "search_simple": 1,
             "action": "process",
             "json": 1,
-            "page_size": page_size,
-            "fields": FIELDS_SEARCH,
+            "page_size": 30,
+            "fields": FIELDS,
             "sort_by": "unique_scans_n",
+        }
+        if extra_params:
+            params.update(extra_params)
+        data = _fetch(f"{OFF}/cgi/search.pl", params)
+        return (data or {}).get("products", []) or []
+
+    def v2_search(term):
+        """OFF v2 API – tarkka countries_tags-filtteri."""
+        data = _fetch(f"{OFF}/api/v2/search", {
+            "search_terms": term,
+            "countries_tags": FINLAND_TAG,
+            "fields": FIELDS,
+            "sort_by": "unique_scans_n",
+            "page_size": 30,
         })
-        return (data or {}).get("products", [])
+        hits = (data or {}).get("products", []) or []
+        # v2 voi palauttaa myös product-avaimella
+        if not hits:
+            hits = (data or {}).get("product", []) or []
+        return hits
 
-    results = []
-
-    # Vaihe 1: Hae suomenkielisellä hakusanalla, Suomi-filtteri
-    results = fetch_with_country(query, "finland")
-
-    # Vaihe 2: Jos vähän tuloksia, hae myös englanninkäännöksellä
-    if len(results) < 3 and use_en:
-        r2 = fetch_with_country(search_term, "finland")
-        codes = {p.get("code") for p in results}
-        results += [p for p in r2 if p.get("code") not in codes]
-
-    # Vaihe 3: Hae kauppakohtaisilla tageilla (Kesko, S-ryhmä, Lidl FI)
-    if len(results) < 3:
-        for store_tag in ["en:k-ruoka", "en:s-market", "en:prisma", "en:lidl-finland",
-                          "en:alepa", "en:k-citymarket", "en:k-market"]:
-            data = _fetch(f"{OFF}/cgi/search.pl", {
-                "search_terms": search_term,
-                "tagtype_0": "stores",
-                "tag_contains_0": "contains",
-                "tag_0": store_tag,
-                "search_simple": 1, "action": "process",
-                "json": 1, "page_size": 20,
-                "fields": FIELDS_SEARCH, "sort_by": "unique_scans_n",
-            })
-            r3 = (data or {}).get("products", [])
-            codes = {p.get("code") for p in results}
-            results += [p for p in r3 if p.get("code") not in codes]
-            if len(results) >= 8:
-                break
-
-    # Vaihe 4: Viimeinen vaihtoehto – hae ilman filtteriä,
-    # pidä VAIN tuotteet joilla on Suomi countries_tagin tai fi-kieliset nimet
-    if len(results) < 2:
-        data = _fetch(f"{OFF}/cgi/search.pl", {
-            "search_terms": search_term,
-            "search_simple": 1, "action": "process",
-            "json": 1, "page_size": 50,
-            "fields": FIELDS_SEARCH, "sort_by": "unique_scans_n",
-        })
-        all_results = (data or {}).get("products", [])
-        codes = {p.get("code") for p in results}
-        for p in all_results:
+    def only_fi(items, existing_codes=None):
+        """Suodattaa pois tuotteet joilla ei ole Suomi-tageja."""
+        codes = existing_codes or set()
+        out = []
+        for p in items:
             if p.get("code") in codes:
                 continue
             ctags = set(p.get("countries_tags") or [])
-            langs = set(p.get("languages_codes") or {})
-            name_fi = p.get("product_name_fi", "")
-            if "en:finland" in ctags or "fi:suomi" in ctags or "fi" in langs or name_fi:
-                results.append(p)
+            langs = set((p.get("languages_codes") or {}).keys()) if isinstance(p.get("languages_codes"), dict) else set()
+            fi_name = bool(p.get("product_name_fi"))
+            if (FINLAND_TAG in ctags or "fi:suomi" in ctags or "fi" in langs or fi_name):
+                out.append(p)
+                codes.add(p.get("code"))
+        return out, codes
 
-    # Poista tuotteet ilman nimeä ja järjestä pistemäärän mukaan
+    results = []
+    seen = set()
+
+    # ── Vaihe 1: v2 API, suomenkielinen hakusana ──────────────────────────────
+    r1 = v2_search(query)
+    new1, seen = only_fi(r1, seen)
+    results += new1
+
+    # ── Vaihe 2: v2 API, englanninkäännös ─────────────────────────────────────
+    if len(results) < 4 and use_en:
+        r2 = v2_search(en_term)
+        new2, seen = only_fi(r2, seen)
+        results += new2
+
+    # ── Vaihe 3: cgi search.pl, tagtype countries = en:finland ───────────────
+    if len(results) < 4:
+        r3 = cgi_search(en_term, {
+            "tagtype_0": "countries",
+            "tag_contains_0": "contains",
+            "tag_0": FINLAND_TAG,
+        })
+        new3, seen = only_fi(r3, seen)
+        results += new3
+
+    # ── Vaihe 4: cgi search.pl, suomenkielinen hakusana + finland-tagi ───────
+    if len(results) < 4:
+        r4 = cgi_search(query, {
+            "tagtype_0": "countries",
+            "tag_contains_0": "contains",
+            "tag_0": FINLAND_TAG,
+        })
+        new4, seen = only_fi(r4, seen)
+        results += new4
+
+    # ── Vaihe 5: cgi ilman filtteriä – suodatetaan jälkikäteen ───────────────
+    if len(results) < 2:
+        r5 = cgi_search(en_term, {"page_size": 50})
+        new5, seen = only_fi(r5, seen)
+        results += new5
+        if len(results) < 2:
+            r5b = cgi_search(query, {"page_size": 50})
+            new5b, seen = only_fi(r5b, seen)
+            results += new5b
+
     results = [p for p in results if p.get("product_name")]
-    results.sort(key=lambda p: _score_product(p, search_term), reverse=True)
+    results.sort(key=lambda p: _score_product(p, en_term), reverse=True)
     return results[:20]
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -833,84 +852,84 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
     # Pakkaus
     packagings = product.get("packagings", [])
     if packagings:
-        # Käännöstaulukot: EN/tag → suomi
-        MAT_FI = {
-            "plastic": "Muovi", "pp": "Polypropeeni (PP)", "pet": "PET-muovi",
-            "pe": "Polyeteeni (PE)", "hdpe": "HDPE-muovi", "ldpe": "LDPE-muovi",
-            "pvc": "PVC-muovi", "ps": "Polystyreeni",
-            "glass": "Lasi", "cardboard": "Kartonki", "paper": "Paperi",
-            "paperboard": "Kartonki", "corrugated-cardboard": "Aaltopahvi",
-            "metal": "Metalli", "aluminium": "Alumiini", "steel": "Teräs",
-            "tin": "Tina", "iron": "Rauta",
-            "wood": "Puu", "ceramic": "Keraami",
-            "bioplastic": "Biomuovi", "compostable-plastic": "Kompostoituva muovi",
-            "recycled-plastic": "Kierrätetty muovi",
-            "recycled-cardboard": "Kierrätetty kartonki",
-            "kraft-paper": "Kraftpaperi", "wax-paper": "Vahapaperi",
-            "multilayer": "Monikerros", "tetra-pak": "Tetra Pak",
+        _MAT = {
+            "plastic":"Muovi","pp":"PP-muovi","pet":"PET-muovi","pe":"PE-muovi",
+            "hdpe":"HDPE-muovi","ldpe":"LDPE-muovi","pvc":"PVC","ps":"Polystyreeni",
+            "glass":"Lasi","cardboard":"Kartonki","paper":"Paperi",
+            "paperboard":"Kartonki","corrugated-cardboard":"Aaltopahvi",
+            "metal":"Metalli","aluminium":"Alumiini","steel":"Teräs","tin":"Tina",
+            "bioplastic":"Biomuovi","compostable-plastic":"Kompostoituva muovi",
+            "recycled-plastic":"Kierrätetty muovi","recycled-cardboard":"Kierrätetty kartonki",
+            "kraft-paper":"Kraftpaperi","multilayer":"Monikerros","tetra-pak":"Tetra Pak",
         }
-        SHAPE_FI = {
-            "bottle": "Pullo", "can": "Tölkki", "box": "Laatikko",
-            "bag": "Pussi", "pouch": "Pussi", "jar": "Purkki",
-            "tray": "Aluslevy", "tube": "Tuubi", "carton": "Kartonkipakkaus",
-            "wrap": "Kääre", "film": "Kalvo", "lid": "Kansi",
-            "cap": "Korkki", "sleeve": "Holkki", "packet": "Paketti",
-            "cup": "Kuppi", "container": "Astia", "sachet": "Pussukka",
-            "tetra-pak": "Tetra Pak", "blister": "Läpipainopakkaus",
+        _SHAPE = {
+            "bottle":"Pullo","can":"Tölkki","box":"Laatikko","bag":"Pussi",
+            "pouch":"Pussi","jar":"Purkki","tray":"Aluslevy","tube":"Tuubi",
+            "carton":"Kartonkipakkaus","wrap":"Kääre","film":"Kalvo","lid":"Kansi",
+            "cap":"Korkki","cup":"Kuppi","container":"Astia","sachet":"Pussukka",
+            "tetra-pak":"Tetra Pak","blister":"Läpipainopakkaus","packet":"Paketti",
         }
-        REC_FI = {
-            "recycle": "Kierrätetään", "recyclable": "Kierrätettävissä",
-            "do-not-recycle": "Ei kierrätetä", "compost": "Kompostoidaan",
-            "reuse": "Uudelleenkäytettävä",
-            "recycle-in-dedicated-bin": "Kierrätyspisteeseen",
-            "recycle-as-plastic": "Muovijätteeseen",
-            "recycle-as-paper": "Paperijätteeseen",
-            "recycle-as-glass": "Lasijätteeseen",
-            "recycle-as-metal": "Metallijätteeseen",
+        _REC = {
+            "recycle":"Kierrätetään","recyclable":"Kierrätettävissä",
+            "do-not-recycle":"Ei kierrätetä","compost":"Kompostoidaan",
+            "reuse":"Uudelleenkäytettävä","recycle-in-dedicated-bin":"Kierrätyspisteeseen",
+            "recycle-as-plastic":"Muovijätteeseen","recycle-as-paper":"Paperijätteeseen",
+            "recycle-as-glass":"Lasijätteeseen","recycle-as-metal":"Metallijätteeseen",
         }
 
-        def _translate(val, table):
-            """Muuntaa koodin (en:plastic tai plastic) luettavaksi tekstiksi."""
+        def _pkg_txt(val, table):
             if not val:
-                return ""
+                return None
+            # Hae raakaarvo
             if isinstance(val, dict):
-                # Kokeile suomenkielistä ensin, sitten englantia
                 raw = val.get("fi") or val.get("en") or val.get("id") or ""
             else:
                 raw = str(val)
-            # Poista etuliitteet kuten "en:", "fi:"
-            clean = raw.lower().replace("en:", "").replace("fi:", "").strip()
-            # Tarkista suoraan käännöstaulusta
+            # Siivoa tunnisteista (en:plastic → plastic)
+            clean = raw.lower()
+            for prefix in ("en:", "fi:", "fr:", "de:", "sv:"):
+                clean = clean.replace(prefix, "")
+            clean = clean.strip()
+            if not clean or clean in ("unknown", "?", "none", ""):
+                return None
+            # Etsi käännöstaulusta tarkka tai osittainen osuma
             if clean in table:
                 return table[clean]
-            # Tarkista osuman perusteella
-            for key, translation in table.items():
+            for key, val_fi in table.items():
                 if key in clean:
-                    return translation
-            # Palauta siistiytynä versio raakatekstistä
-            return clean.replace("-", " ").replace("_", " ").title()
+                    return val_fi
+            # Älä palauta raakatunnistetta – palauta None jos ei tunnistettu
+            if ":" in clean or len(clean) > 40:
+                return None
+            return clean.replace("-", " ").replace("_", " ").capitalize()
 
         st.markdown("### 📦 Pakkausmateriaalit")
         pkg_grade, pkg_text = score_packaging(packagings)
-        pkg_colors = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
+        _pkg_bg = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
+        _bg = _pkg_bg.get(pkg_grade, "#f0f0f0")
         st.markdown(
-            f"<div style='background:{pkg_colors.get(pkg_grade,"#f0f0f0")};border-radius:8px;"
-            f"padding:8px 14px;margin-bottom:8px;display:inline-block'>"
+            f"<div style='background:{_bg};border-radius:8px;padding:8px 14px;"
+            f"margin-bottom:8px;display:inline-block'>"
             f"<b>Arvosana: {pkg_grade}</b> – {pkg_text}</div>",
             unsafe_allow_html=True
         )
+        shown = 0
         for pkg in packagings:
-            mat   = _translate(pkg.get("material"),  MAT_FI)
-            shape = _translate(pkg.get("shape"),     SHAPE_FI)
-            rec   = _translate(pkg.get("recycling"), REC_FI)
-            qty   = pkg.get("quantity_per_unit") or ""
-            label_parts = []
-            if shape: label_parts.append(f"**{shape}**")
-            if mat:   label_parts.append(mat)
-            if qty:   label_parts.append(f"({qty})")
-            if label_parts:
+            mat   = _pkg_txt(pkg.get("material"),  _MAT)
+            shape = _pkg_txt(pkg.get("shape"),     _SHAPE)
+            rec   = _pkg_txt(pkg.get("recycling"), _REC)
+            qty   = (pkg.get("quantity_per_unit") or "").strip()
+            parts = []
+            if shape: parts.append(f"**{shape}**")
+            if mat:   parts.append(mat)
+            if qty and not any(c in qty for c in [":", "en:", "unknown"]):
+                parts.append(f"({qty})")
+            if parts:
                 rec_txt = f"♻️ {rec}" if rec else "♻️ Kierrätystieto puuttuu"
-                st.markdown(f"- {' – '.join(label_parts)} → {rec_txt}")
+                st.markdown(f"- {' – '.join(parts)} → {rec_txt}")
+                shown += 1
+        if shown == 0:
+            st.caption("Pakkaustieto ei ole luettavassa muodossa tässä tuotteessa.")
 
     # Sertifikaatit
     labels = [l for l in product.get("labels_tags", [])
@@ -1046,7 +1065,7 @@ def show_product_card(p: dict):
 # ── SIVUPALKKI ────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🌿 Kauppanavigaattori")
-    st.caption("Kestävät valinnat helposti – ilman syyllistämistä")
+    st.caption("Kestävät valinnat helposti")
     st.markdown("---")
     page = st.radio("", [
         "🔍 Hae tuotteita",
@@ -1610,7 +1629,6 @@ elif "Tietoa" in page:
         **Mistä pisteet tulevat?** Katsotaan koko matka pellolta kauppaan: viljely, tehdas, kuljetus ja pakkaus.
         Luomumerkki, kierrätettävä pakkaus ja lähituotanto parantavat pisteitä.
 
-        💚 **Pieni vinkki:** Vaihda naudanliha kanaan tai kalaan – se on yksi nopeimmista tavoista pienentää ruoan ympäristövaikutusta.
         """)
 
     with tab2:
@@ -1680,5 +1698,5 @@ elif "Tietoa" in page:
     st.markdown("""
     ### 🌟 Muista
     Kaikkia näitä pisteitä kannattaa käyttää **apuvälineenä**, ei tiukkana sääntönä.
-    Pienetkin muutokset arjen valinnoissa vaikuttavat positiivisesti – jokainen hyvä valinta lasketaan! 💚
+    Pienetkin muutokset arjen valinnoissa vaikuttavat positiivisesti – jokainen hyvä valinta lasketaan!
     """)
