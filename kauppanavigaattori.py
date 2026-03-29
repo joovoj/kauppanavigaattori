@@ -239,104 +239,80 @@ def _score_product(product: dict, query: str) -> int:
 def _is_relevant(product: dict, query: str) -> bool:
     return _score_product(product, query) > 0
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def search_products(query: str) -> list:
-    """Hakee VAIN Suomessa myynnissä olevia tuotteita Open Food Facts -tietokannasta."""
+    """
+    Hakee Suomessa myynnissä olevia tuotteita.
+    Käyttää fi.openfoodfacts.org -instanssia ensisijaisesti,
+    sitten world.openfoodfacts.org Finland-tagilla,
+    ja viimeisenä globaalia hakua josta suodatetaan suomalaiset.
+    """
     en_query = _translate_query(query)
     use_en   = en_query.lower() != query.lower()
     en_term  = en_query if use_en else query
 
-    FINLAND_TAG = "en:finland"
-    FIELDS = FIELDS_SEARCH + ",languages_codes,product_name_fi"
-
-    def cgi_search(term, extra_params=None):
-        params = {
-            "search_terms": term,
-            "search_simple": 1,
-            "action": "process",
-            "json": 1,
-            "page_size": 30,
-            "fields": FIELDS,
-            "sort_by": "unique_scans_n",
-        }
-        if extra_params:
-            params.update(extra_params)
-        data = _fetch(f"{OFF}/cgi/search.pl", params)
-        return (data or {}).get("products", []) or []
-
-    def v2_search(term):
-        """OFF v2 API – tarkka countries_tags-filtteri."""
-        data = _fetch(f"{OFF}/api/v2/search", {
-            "search_terms": term,
-            "countries_tags": FINLAND_TAG,
-            "fields": FIELDS,
-            "sort_by": "unique_scans_n",
-            "page_size": 30,
-        })
-        hits = (data or {}).get("products", []) or []
-        # v2 voi palauttaa myös product-avaimella
-        if not hits:
-            hits = (data or {}).get("product", []) or []
-        return hits
-
-    def only_fi(items, existing_codes=None):
-        """Suodattaa pois tuotteet joilla ei ole Suomi-tageja."""
-        codes = existing_codes or set()
-        out = []
-        for p in items:
-            if p.get("code") in codes:
-                continue
-            ctags = set(p.get("countries_tags") or [])
-            langs = set((p.get("languages_codes") or {}).keys()) if isinstance(p.get("languages_codes"), dict) else set()
-            fi_name = bool(p.get("product_name_fi"))
-            if (FINLAND_TAG in ctags or "fi:suomi" in ctags or "fi" in langs or fi_name):
-                out.append(p)
-                codes.add(p.get("code"))
-        return out, codes
-
+    seen    = set()
     results = []
-    seen = set()
 
-    # ── Vaihe 1: v2 API, suomenkielinen hakusana ──────────────────────────────
-    r1 = v2_search(query)
-    new1, seen = only_fi(r1, seen)
-    results += new1
+    def _add(items):
+        for p in items:
+            c = p.get("code")
+            if c and c not in seen and p.get("product_name"):
+                seen.add(c)
+                results.append(p)
 
-    # ── Vaihe 2: v2 API, englanninkäännös ─────────────────────────────────────
-    if len(results) < 4 and use_en:
-        r2 = v2_search(en_term)
-        new2, seen = only_fi(r2, seen)
-        results += new2
+    def cgi(base_url, term, extra=None, n=30):
+        params = {
+            "search_terms":  term,
+            "search_simple": 1,
+            "action":        "process",
+            "json":          1,
+            "page_size":     n,
+            "fields":        FIELDS_SEARCH,
+            "sort_by":       "unique_scans_n",
+        }
+        if extra:
+            params.update(extra)
+        d = _fetch(base_url, params)
+        return (d or {}).get("products", []) or []
 
-    # ── Vaihe 3: cgi search.pl, tagtype countries = en:finland ───────────────
-    if len(results) < 4:
-        r3 = cgi_search(en_term, {
-            "tagtype_0": "countries",
-            "tag_contains_0": "contains",
-            "tag_0": FINLAND_TAG,
-        })
-        new3, seen = only_fi(r3, seen)
-        results += new3
+    def is_fi(p):
+        ctags = set(p.get("countries_tags") or [])
+        return bool(ctags & {"en:finland", "fi:suomi"})
 
-    # ── Vaihe 4: cgi search.pl, suomenkielinen hakusana + finland-tagi ───────
-    if len(results) < 4:
-        r4 = cgi_search(query, {
-            "tagtype_0": "countries",
-            "tag_contains_0": "contains",
-            "tag_0": FINLAND_TAG,
-        })
-        new4, seen = only_fi(r4, seen)
-        results += new4
+    FI_BASE    = "https://fi.openfoodfacts.org/cgi/search.pl"
+    WORLD_BASE = "https://world.openfoodfacts.org/cgi/search.pl"
+    FI_FILTER  = {
+        "tagtype_0":      "countries",
+        "tag_contains_0": "contains",
+        "tag_0":          "en:finland",
+    }
 
-    # ── Vaihe 5: cgi ilman filtteriä – suodatetaan jälkikäteen ───────────────
+    # ── 1. Suomen instanssi, englanninkäännös ─────────────────────────────────
+    _add(cgi(FI_BASE, en_term))
+
+    # ── 2. Suomen instanssi, alkuperäinen hakusana ────────────────────────────
+    if use_en and len(results) < 5:
+        _add(cgi(FI_BASE, query))
+
+    # ── 3. World + en:finland-tagi, englanninkäännös ─────────────────────────
+    if len(results) < 5:
+        _add(cgi(WORLD_BASE, en_term, FI_FILTER))
+
+    # ── 4. World + en:finland-tagi, alkuperäinen hakusana ────────────────────
+    if len(results) < 5 and use_en:
+        _add(cgi(WORLD_BASE, query, FI_FILTER))
+
+    # ── 5. Globaali haku, suodatetaan Finnish-tuotteet jälkikäteen ────────────
     if len(results) < 2:
-        r5 = cgi_search(en_term, {"page_size": 50})
-        new5, seen = only_fi(r5, seen)
-        results += new5
-        if len(results) < 2:
-            r5b = cgi_search(query, {"page_size": 50})
-            new5b, seen = only_fi(r5b, seen)
-            results += new5b
+        _add([p for p in cgi(WORLD_BASE, en_term, n=60) if is_fi(p)])
+        if use_en:
+            _add([p for p in cgi(WORLD_BASE, query, n=60) if is_fi(p)])
+
+    # ── 6. Viimeinen vaihtoehto: globaali, ei Finland-filtteriä ──────────────
+    #    (näyttää tuloksia vaikka Suomi-dataa ei löydy)
+    if len(results) < 2:
+        _add(cgi(WORLD_BASE, en_term, n=20))
 
     results = [p for p in results if p.get("product_name")]
     results.sort(key=lambda p: _score_product(p, en_term), reverse=True)
