@@ -152,8 +152,8 @@ import time
 
 OFF   = "https://world.openfoodfacts.org"
 # Käytetään vain välttämättömät kentät – vähemmän dataa = nopeampi vastaus
-FIELDS_SEARCH = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,countries_tags,labels_tags"
-FIELDS_FULL   = "code,product_name,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_url,categories_tags,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text"
+FIELDS_SEARCH = "code,product_name,product_name_fi,product_name_en,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_small_url,categories_tags,countries_tags,labels_tags"
+FIELDS_FULL   = "code,product_name,product_name_fi,product_name_en,brands,nutrition_grades,ecoscore_grade,ecoscore_score,nova_group,image_front_url,categories_tags,countries_tags,carbon_footprint_from_known_ingredients_100g,packagings,labels_tags,ecoscore_data,nutriments,ingredients_text"
 HEADERS = {"User-Agent": "KauppaNavigaattori/2.0"}
 
 def _fetch(url: str, params: dict, timeout: int = 15) -> dict | None:
@@ -760,9 +760,25 @@ def eco_stars(score) -> str:
     stars = int(score / 20)
     return "⭐" * stars + "☆" * (5 - stars)
 
+
+# ── SUOMENKIELINEN TUOTENIMI ──────────────────────────────────────────────────
+def get_fi_name(product: dict) -> str:
+    """Hakee tuotteen nimen suomeksi. Ensisijaisuus: fi > alkuperäinen > en."""
+    fi  = (product.get("product_name_fi") or "").strip()
+    if fi:
+        return fi
+    generic = (product.get("product_name") or "").strip()
+    # Jos nimi on pelkästään ASCII ja on olemassa suomenkielinen kenttä, käytä sitä
+    en = (product.get("product_name_en") or "").strip()
+    if generic:
+        return generic
+    if en:
+        return en
+    return "Tuntematon tuote"
+
 # ── TUOTTEEN TIEDOT ───────────────────────────────────────────────────────────
 def show_product_detail(product: dict, show_alternatives: bool = True):
-    name = product.get("product_name") or "Tuntematon tuote"
+    name = get_fi_name(product)
     brand = product.get("brands", "")
     eco = product.get("ecoscore_grade", "?")
     eco_score = product.get("ecoscore_score")
@@ -825,87 +841,6 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
     else:
         st.info("Hiilijalanjälkitieto ei saatavilla. Eco-Score antaa suuntaa ympäristövaikutuksesta.")
 
-    # Pakkaus
-    packagings = product.get("packagings", [])
-    if packagings:
-        _MAT = {
-            "plastic":"Muovi","pp":"PP-muovi","pet":"PET-muovi","pe":"PE-muovi",
-            "hdpe":"HDPE-muovi","ldpe":"LDPE-muovi","pvc":"PVC","ps":"Polystyreeni",
-            "glass":"Lasi","cardboard":"Kartonki","paper":"Paperi",
-            "paperboard":"Kartonki","corrugated-cardboard":"Aaltopahvi",
-            "metal":"Metalli","aluminium":"Alumiini","steel":"Teräs","tin":"Tina",
-            "bioplastic":"Biomuovi","compostable-plastic":"Kompostoituva muovi",
-            "recycled-plastic":"Kierrätetty muovi","recycled-cardboard":"Kierrätetty kartonki",
-            "kraft-paper":"Kraftpaperi","multilayer":"Monikerros","tetra-pak":"Tetra Pak",
-        }
-        _SHAPE = {
-            "bottle":"Pullo","can":"Tölkki","box":"Laatikko","bag":"Pussi",
-            "pouch":"Pussi","jar":"Purkki","tray":"Aluslevy","tube":"Tuubi",
-            "carton":"Kartonkipakkaus","wrap":"Kääre","film":"Kalvo","lid":"Kansi",
-            "cap":"Korkki","cup":"Kuppi","container":"Astia","sachet":"Pussukka",
-            "tetra-pak":"Tetra Pak","blister":"Läpipainopakkaus","packet":"Paketti",
-        }
-        _REC = {
-            "recycle":"Kierrätetään","recyclable":"Kierrätettävissä",
-            "do-not-recycle":"Ei kierrätetä","compost":"Kompostoidaan",
-            "reuse":"Uudelleenkäytettävä","recycle-in-dedicated-bin":"Kierrätyspisteeseen",
-            "recycle-as-plastic":"Muovijätteeseen","recycle-as-paper":"Paperijätteeseen",
-            "recycle-as-glass":"Lasijätteeseen","recycle-as-metal":"Metallijätteeseen",
-        }
-
-        def _pkg_txt(val, table):
-            if not val:
-                return None
-            # Hae raakaarvo
-            if isinstance(val, dict):
-                raw = val.get("fi") or val.get("en") or val.get("id") or ""
-            else:
-                raw = str(val)
-            # Siivoa tunnisteista (en:plastic → plastic)
-            clean = raw.lower()
-            for prefix in ("en:", "fi:", "fr:", "de:", "sv:"):
-                clean = clean.replace(prefix, "")
-            clean = clean.strip()
-            if not clean or clean in ("unknown", "?", "none", ""):
-                return None
-            # Etsi käännöstaulusta tarkka tai osittainen osuma
-            if clean in table:
-                return table[clean]
-            for key, val_fi in table.items():
-                if key in clean:
-                    return val_fi
-            # Älä palauta raakatunnistetta – palauta None jos ei tunnistettu
-            if ":" in clean or len(clean) > 40:
-                return None
-            return clean.replace("-", " ").replace("_", " ").capitalize()
-
-        st.markdown("### 📦 Pakkausmateriaalit")
-        pkg_grade, pkg_text = score_packaging(packagings)
-        _pkg_bg = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
-        _bg = _pkg_bg.get(pkg_grade, "#f0f0f0")
-        st.markdown(
-            f"<div style='background:{_bg};border-radius:8px;padding:8px 14px;"
-            f"margin-bottom:8px;display:inline-block'>"
-            f"<b>Arvosana: {pkg_grade}</b> – {pkg_text}</div>",
-            unsafe_allow_html=True
-        )
-        shown = 0
-        for pkg in packagings:
-            mat   = _pkg_txt(pkg.get("material"),  _MAT)
-            shape = _pkg_txt(pkg.get("shape"),     _SHAPE)
-            rec   = _pkg_txt(pkg.get("recycling"), _REC)
-            qty   = (pkg.get("quantity_per_unit") or "").strip()
-            parts = []
-            if shape: parts.append(f"**{shape}**")
-            if mat:   parts.append(mat)
-            if qty and not any(c in qty for c in [":", "en:", "unknown"]):
-                parts.append(f"({qty})")
-            if parts:
-                rec_txt = f"♻️ {rec}" if rec else "♻️ Kierrätystieto puuttuu"
-                st.markdown(f"- {' – '.join(parts)} → {rec_txt}")
-                shown += 1
-        if shown == 0:
-            st.caption("Pakkaustieto ei ole luettavassa muodossa tässä tuotteessa.")
 
     # Sertifikaatit
     labels = [l for l in product.get("labels_tags", [])
@@ -923,14 +858,6 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.markdown(f"""<div style='background:{bg};border-radius:8px;padding:10px 16px;margin:8px 0;display:inline-block'>
 <span style='font-size:1.05em'>🌐 <b>Alkuperämaa:</b> {origin}</span></div>""", unsafe_allow_html=True)
 
-    # Pakkauksen arviointi
-    packagings = product.get("packagings") or []
-    if packagings:
-        pkg_grade, pkg_text = score_packaging(packagings)
-        pkg_colors = {"A":"#d4edda","B":"#fff3cd","C":"#ffe0b2","D":"#f8d7da","?":"#f0f0f0"}
-        st.markdown(f"""<div style='background:{pkg_colors.get(pkg_grade,"#f0f0f0")};border-radius:8px;padding:10px 16px;margin:8px 0'>
-<b>📦 Pakkauksen arvosana: {pkg_grade}</b> – {pkg_text}</div>""", unsafe_allow_html=True)
-
     # Lisää ostoslistalle
     st.markdown("---")
     col_a, col_b, col_c = st.columns(3)
@@ -942,7 +869,7 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🛒 Lisää ostoslistalle", key=f"shop_{name[:15]}"):
             item = {
-                "name": name, "brand": brand, "eco": eco, "nutri": nutri, "nova": nova,
+                "name": get_fi_name(product), "brand": brand, "eco": eco, "nutri": nutri, "nova": nova,
                 "carbon": carbon, "qty": qty, "price": price,
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "countries_tags": product.get("countries_tags", []),
@@ -1004,7 +931,7 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
             st.info("Vaihtoehtoja ei löydy tällä hetkellä – kokeile hakea itse eri tuotteita.")
 
 def show_product_card(p: dict):
-    name = p.get("product_name") or "?"
+    name = get_fi_name(p)
     brand = p.get("brands","")
     eco = p.get("ecoscore_grade","?")
     nutri = p.get("nutrition_grades","?")
