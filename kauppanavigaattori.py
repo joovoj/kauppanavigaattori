@@ -977,7 +977,6 @@ with st.sidebar:
         "🗑️ Hävikinseuranta",
         "🗓️ Ateriasuunnittelija",
         "🏆 Kestävyyspisteet",
-        "📈 Tilastot",
         "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
@@ -1289,7 +1288,7 @@ elif "Ateriasuunnittelija" in page:
     st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
 
     DAYS = ["Maanantai","Tiistai","Keskiviikko","Torstai","Perjantai","Lauantai","Sunnuntai"]
-    MEALS = ["Aamupala","Lounas","Päivällinen","Välipala"]
+    MEALS = ["Aamupala","Lounas","Päivällinen","Iltapala","Välipala"]
 
     if not isinstance(st.session_state.mealplan, dict):
         st.session_state.mealplan = {}
