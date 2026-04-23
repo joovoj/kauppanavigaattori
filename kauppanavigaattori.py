@@ -1020,8 +1020,9 @@ if st.session_state.view == "detail":
 if "Hae" in page:
     st.title("🔍 Hae tuotteita")
     st.markdown("Löydä tuotteet ja tarkista niiden ympäristö- ja ravitsemustiedot ennen ostosta.")
+    st.caption("Tuotteet haetaan avoimesta tietokannasta, joten haut eivät välttämättä aina toimi ja tällöin yritä uudestaan isolla kirjaimella tai eri hakusanalla.")
 
-    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, fazer, lohi...")
+    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, lohi, juusto...")
     sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
 
     if q:
@@ -1074,12 +1075,6 @@ elif "Viivakoodi" in page:
         else:
             st.error("Tuotetta ei löydy. Tarkista viivakoodi tai hae tuotteen nimellä.")
 
-    st.markdown("---")
-    st.markdown("""
-    **Testaa näillä suomalaisilla viivakoodeilla:**
-    - `6410405082657` – Valio tuote
-    - `6416539002014` – Fazer
-    """)
 
 # ── 3. OSTOSLISTA ─────────────────────────────────────────────────────────────
 elif "Ostoslista" in page:
@@ -1288,7 +1283,7 @@ elif "Ateriasuunnittelija" in page:
     st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
 
     DAYS = ["Maanantai","Tiistai","Keskiviikko","Torstai","Perjantai","Lauantai","Sunnuntai"]
-    MEALS = ["Aamupala","Lounas","Päivällinen","Iltapala","Välipala"]
+    MEALS = ["Aamupala","Lounas","Välipala","Päivällinen","Iltapala"]
 
     if not isinstance(st.session_state.mealplan, dict):
         st.session_state.mealplan = {}
