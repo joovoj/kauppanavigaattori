@@ -3,6 +3,7 @@ import requests
 import json
 import pandas as pd
 from datetime import datetime, date
+import os
 
 st.set_page_config(
     page_title="🌿 Kauppanavigaattori",
@@ -112,37 +113,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── APUDATA ──────────────────────────────────────────────────────────────────
-# Tiedostotallennus poistettu - käytetään vain session_state (käyttäjäkohtainen)
-# Tiedostovakiot (save_json on no-op, nämä estävät NameError-virheet)
 HISTORY_FILE   = "ostohistoria.json"
 SHOPPING_FILE  = "ostoslista.json"
 WASTE_FILE     = "kaappitavarat.json"
 MEALPLAN_FILE  = "ateriasuunnitelma.json"
 POINTS_FILE    = "kestävyyspisteet.json"
 
+def load_json(path):
+    return []  # Ei lueta tiedostosta – jokainen käyttäjä saa oman tyhjän listan
 
 def save_json(path, data):
-    pass  # Tallennus poistettu - data pysyy session_statessa
+    pass  # Ei tallenneta tiedostoon – data pysyy käyttäjän omassa session_statessa
 
-# Poistetaan vanhat JSON-tiedostot jos ne löytyvät palvelimelta
-import os as _os
-for _f in ["ostoslista.json","kaappitavarat.json","ateriasuunnitelma.json","kestävyyspisteet.json","ostohistoria.json"]:
-    if _os.path.exists(_f):
-        try: _os.remove(_f)
-        except: pass
-
-# Alustetaan session_state käyttäjäkohtaisesti (ei jaeta muiden käyttäjien kanssa)
-import copy as _copy
-_DEFAULTS = {
-    "history":  [],
-    "shopping": [],
-    "waste":    [],
-    "mealplan": {},
-    "points":   {},
-}
-for key, default in _DEFAULTS.items():
+for key, file in [
+    ("history",  HISTORY_FILE),
+    ("shopping", SHOPPING_FILE),
+    ("waste",    WASTE_FILE),
+    ("mealplan", MEALPLAN_FILE),
+    ("points",   POINTS_FILE),
+]:
     if key not in st.session_state:
-        st.session_state[key] = _copy.deepcopy(default)
+        st.session_state[key] = load_json(file)
 
 # Pisteet: varmista perusrakenne
 if not isinstance(st.session_state.points, dict):
@@ -832,16 +823,24 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
 
     # Hiilijalanjälki
     st.markdown("### 🌍 Hiilijalanjälki")
-    if carbon:
-        context = carbon_context(carbon)
-        st.markdown(f"**{carbon:.1f} g CO₂e / 100 g** &nbsp; {context}", unsafe_allow_html=True)
-        pct = min(carbon / 400 * 100, 100)
-        col = "#1e8449" if carbon < 80 else "#e67e22" if carbon < 200 else "#c0392b"
+    # Käytä tarkkaa dataa jos saatavilla, muuten laske kategoriapohjainen arvio
+    carbon_display = carbon
+    carbon_is_estimate = False
+    if not carbon_display:
+        carbon_display = estimate_co2(product, 100)
+        carbon_is_estimate = True
+    if carbon_display:
+        context = carbon_context(carbon_display)
+        label = " *(Arvio)*" if carbon_is_estimate else ""
+        st.markdown(f"**{carbon_display:.1f} g CO₂e / 100 g**{label} &nbsp; {context}", unsafe_allow_html=True)
+        pct = min(carbon_display / 400 * 100, 100)
+        col = "#1e8449" if carbon_display < 80 else "#e67e22" if carbon_display < 200 else "#c0392b"
         st.markdown(f"""
         <div style="background:#e8f5ea;border-radius:8px;height:16px;">
           <div style="background:{col};width:{pct:.0f}%;height:16px;border-radius:8px;"></div>
         </div>
         <small style="color:#1a5c2a;">🌱 Pieni &nbsp;→&nbsp; 🔴 Suuri (max näyttää 400 g)</small>
+        {"<br><small style='color:#7a7a7a;font-style:italic;'>* Arvio perustuu tuotekategoriaan. Tarkka data ei saatavilla.</small>" if carbon_is_estimate else ""}
         """, unsafe_allow_html=True)
     else:
         st.info("Hiilijalanjälkitieto ei saatavilla. Eco-Score antaa suuntaa ympäristövaikutuksesta.")
@@ -1247,7 +1246,7 @@ elif "Ateriasuunnittelija" in page:
     st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
 
     DAYS = ["Maanantai","Tiistai","Keskiviikko","Torstai","Perjantai","Lauantai","Sunnuntai"]
-    MEALS = ["Aamupala","Lounas","Päivällinen","Välipala"]
+    MEALS = ["Aamupala","Lounas","Päivällinen","Välipala","Iltapala"]
 
     if not isinstance(st.session_state.mealplan, dict):
         st.session_state.mealplan = {}
