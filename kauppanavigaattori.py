@@ -113,6 +113,13 @@ st.markdown("""
 
 # ── APUDATA ──────────────────────────────────────────────────────────────────
 # Tiedostotallennus poistettu - käytetään vain session_state (käyttäjäkohtainen)
+# Tiedostovakiot (save_json on no-op, nämä estävät NameError-virheet)
+HISTORY_FILE   = "ostohistoria.json"
+SHOPPING_FILE  = "ostoslista.json"
+WASTE_FILE     = "kaappitavarat.json"
+MEALPLAN_FILE  = "ateriasuunnitelma.json"
+POINTS_FILE    = "kestävyyspisteet.json"
+
 
 def save_json(path, data):
     pass  # Tallennus poistettu - data pysyy session_statessa
@@ -975,7 +982,6 @@ with st.sidebar:
         "🗑️ Hävikinseuranta",
         "🗓️ Ateriasuunnittelija",
         "🏆 Kestävyyspisteet",
-        "📈 Tilastot",
         "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
@@ -1235,53 +1241,7 @@ elif "Hävikinseuranta" in page:
         """)
 
 # ── 5. TILASTOT ───────────────────────────────────────────────────────────────
-elif "Tilastot" in page:
-    st.title("📈 Ostostilastot")
 
-    if not st.session_state.shopping:
-        st.info("Lisää tuotteita ostoslistalle nähdäksesi tilastosi.")
-    else:
-        df = pd.DataFrame(st.session_state.shopping)
-
-        st.markdown("### 🌿 Eco-Score jakauma")
-        eco_counts = df["eco"].value_counts()
-        grade_order = [g for g in ["a","b","c","d","e"] if g in eco_counts.index]
-        eco_ordered = eco_counts.reindex(grade_order)
-        st.bar_chart(eco_ordered)
-
-        st.markdown("### ⚙️ NOVA-ryhmäjakauma")
-        nova_df = df["nova"].dropna().astype(str).value_counts().sort_index()
-        st.bar_chart(nova_df)
-
-        st.markdown("### 💶 Kulutus ekoluokittain")
-        df["total_price"] = df["price"] * df["qty"]
-        eco_spend = df.groupby("eco")["total_price"].sum().reindex(
-            [g for g in ["a","b","c","d","e"] if g in df["eco"].values])
-        st.bar_chart(eco_spend)
-
-        st.markdown("---")
-        st.markdown("### 📋 Yhteenveto")
-        total = len(df)
-        good_eco = df[df["eco"].isin(["a","b"])].shape[0]
-        bad_eco = df[df["eco"].isin(["d","e"])].shape[0]
-        nova4 = df[df["nova"]==4].shape[0] if "nova" in df else 0
-        total_spend = (df["price"] * df["qty"]).sum()
-        st.markdown(f"""
-        - ✅ **Hyvä Eco (A/B):** {good_eco}/{total} tuotetta ({good_eco/total*100:.0f}%)
-        - ⚠️ **Korkea ympäristövaikutus (D/E):** {bad_eco}/{total} tuotetta
-        - 🍟 **Ultra-prosessoitu (NOVA 4):** {nova4} tuotetta
-        - 💶 **Yhteiskulutus:** {total_spend:.2f} €
-        """)
-
-        if good_eco == total:
-            st.success("🎉 Loistavaa! Kaikki ostoksesi ovat ympäristöystävällisiä valintoja!")
-        elif good_eco / total >= 0.5:
-            st.success("👍 Hyvää työtä! Yli puolet ostoksistasi on kestäviä valintoja.")
-        else:
-            st.info("💡 Pienilläkin muutoksilla voit parantaa ympäristövaikutustasi. Kokeile etsiä A/B-vaihtoehtoja!")
-
-
-# ── 8. ATERIASUUNNITTELIJA ────────────────────────────────────────────────────
 elif "Ateriasuunnittelija" in page:
     st.title("🗓️ Ateriasuunnittelija")
     st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
