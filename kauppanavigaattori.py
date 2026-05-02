@@ -3,7 +3,6 @@ import requests
 import json
 import pandas as pd
 from datetime import datetime, date
-import os
 
 st.set_page_config(
     page_title="🌿 Kauppanavigaattori",
@@ -113,31 +112,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── APUDATA ──────────────────────────────────────────────────────────────────
-HISTORY_FILE   = "ostohistoria.json"
-SHOPPING_FILE  = "ostoslista.json"
-WASTE_FILE     = "kaappitavarat.json"
-MEALPLAN_FILE  = "ateriasuunnitelma.json"
-POINTS_FILE    = "kestävyyspisteet.json"
-
-def load_json(path):
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+# Tiedostotallennus poistettu - käytetään vain session_state (käyttäjäkohtainen)
 
 def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    pass  # Tallennus poistettu - data pysyy session_statessa
 
-for key, file in [
-    ("history",  HISTORY_FILE),
-    ("shopping", SHOPPING_FILE),
-    ("waste",    WASTE_FILE),
-    ("mealplan", MEALPLAN_FILE),
-    ("points",   POINTS_FILE),
-]:
+# Poistetaan vanhat JSON-tiedostot jos ne löytyvät palvelimelta
+import os as _os
+for _f in ["ostoslista.json","kaappitavarat.json","ateriasuunnitelma.json","kestävyyspisteet.json","ostohistoria.json"]:
+    if _os.path.exists(_f):
+        try: _os.remove(_f)
+        except: pass
+
+# Alustetaan session_state käyttäjäkohtaisesti (ei jaeta muiden käyttäjien kanssa)
+import copy as _copy
+_DEFAULTS = {
+    "history":  [],
+    "shopping": [],
+    "waste":    [],
+    "mealplan": {},
+    "points":   {},
+}
+for key, default in _DEFAULTS.items():
     if key not in st.session_state:
-        st.session_state[key] = load_json(file)
+        st.session_state[key] = _copy.deepcopy(default)
 
 # Pisteet: varmista perusrakenne
 if not isinstance(st.session_state.points, dict):
@@ -977,6 +975,7 @@ with st.sidebar:
         "🗑️ Hävikinseuranta",
         "🗓️ Ateriasuunnittelija",
         "🏆 Kestävyyspisteet",
+        "📈 Tilastot",
         "🇫🇮 Fineli-ravintohaku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
@@ -1020,9 +1019,8 @@ if st.session_state.view == "detail":
 if "Hae" in page:
     st.title("🔍 Hae tuotteita")
     st.markdown("Löydä tuotteet ja tarkista niiden ympäristö- ja ravitsemustiedot ennen ostosta.")
-    st.caption("Tuotteet haetaan avoimesta tietokannasta, joten haut eivät välttämättä aina toimi ja tällöin yritä uudestaan isolla kirjaimella tai eri hakusanalla.")
 
-    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, lohi, juusto...")
+    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, fazer, lohi...")
     sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
 
     if q:
@@ -1075,6 +1073,12 @@ elif "Viivakoodi" in page:
         else:
             st.error("Tuotetta ei löydy. Tarkista viivakoodi tai hae tuotteen nimellä.")
 
+    st.markdown("---")
+    st.markdown("""
+    **Testaa näillä suomalaisilla viivakoodeilla:**
+    - `6410405082657` – Valio tuote
+    - `6416539002014` – Fazer
+    """)
 
 # ── 3. OSTOSLISTA ─────────────────────────────────────────────────────────────
 elif "Ostoslista" in page:
@@ -1283,7 +1287,7 @@ elif "Ateriasuunnittelija" in page:
     st.markdown("Suunnittele viikon ateriat etukäteen – sovellus laskee automaattisesti hiilijalanjäljen, ravitsemuksen ja budjetin.")
 
     DAYS = ["Maanantai","Tiistai","Keskiviikko","Torstai","Perjantai","Lauantai","Sunnuntai"]
-    MEALS = ["Aamupala","Lounas","Välipala","Päivällinen","Iltapala"]
+    MEALS = ["Aamupala","Lounas","Päivällinen","Välipala"]
 
     if not isinstance(st.session_state.mealplan, dict):
         st.session_state.mealplan = {}
