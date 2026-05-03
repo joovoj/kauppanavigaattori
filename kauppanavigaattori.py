@@ -696,18 +696,49 @@ CO2_BY_CATEGORY = {
 
 def estimate_co2(product: dict, weight_g: float = 100) -> float:
     """Arvioi tuotteen CO₂ per annettu paino grammoissa."""
-    # Käytä ensin OFF:n omaa dataa
     known = product.get("carbon_footprint_from_known_ingredients_100g")
     if known:
         return float(known) * weight_g / 100
-    # Arvioi kategorian perusteella
-    cats = " ".join(product.get("categories_tags") or []).lower()
-    for cat, co2 in CO2_BY_CATEGORY.items():
-        if cat in cats:
-            return co2 * weight_g / 100 / 10  # kg→g, per 100g
-    return 1.5 * weight_g / 100  # oletusarvo
 
-# ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
+    cats = " ".join(product.get("categories_tags") or []).lower()
+    kruoka_cat = str(product.get("category") or "").lower()
+
+    mapping = {
+        "liha": 550,
+        "kasviprotei": 120,
+        "kala": 250,
+        "merenel": 250,
+        "maito": 110,
+        "juusto": 180,
+        "muna": 130,
+        "rasva": 90,
+        "hedelm": 45,
+        "vihanne": 35,
+        "leivät": 80,
+        "leivonna": 120,
+        "kuivat elintarvikkeet": 95,
+        "leivonta": 95,
+        "säilykkeet": 100,
+        "keitot": 90,
+        "valmisruoka": 170,
+        "öljyt": 70,
+        "etik": 25,
+        "salaattikast": 60,
+        "mausteet": 20,
+        "tex-mex": 110,
+        "maailman maut": 110,
+        "pakasteet": 100,
+        "makeiset": 140,
+        "naposteltavat": 160,
+        "juomat": 40,
+    }
+
+    for key, co2 in mapping.items():
+        if key in kruoka_cat or key in cats:
+            return co2 * weight_g / 100
+    return 120 * weight_g / 100
+
+# ── PISTEYTYS-APUFUNKTIOT# ── PISTEYTYS-APUFUNKTIOT ─────────────────────────────────────────────────────
 def grade_badge(grade: str) -> str:
     g = str(grade).lower()
     if g in ["a","b","c","d","e"]:
@@ -777,15 +808,44 @@ def get_fi_name(product: dict) -> str:
     return "Tuntematon tuote"
 
 # ── TUOTTEEN TIEDOT ───────────────────────────────────────────────────────────
-def show_product_detail(product: dict, show_alternatives: bool = True):
-    name = get_fi_name(product)
-    brand = product.get("brands", "")
-    eco = product.get("ecoscore_grade", "?")
-    eco_score = product.get("ecoscore_score")
-    nutri = product.get("nutrition_grades", "?")
-    nova = product.get("nova_group")
-    carbon = product.get("carbon_footprint_from_known_ingredients_100g")
-    img = product.get("image_front_url")
+@st.cache_data(ttl=1800, show_spinner=False)
+def find_off_match_for_kruoka(product: dict) -> dict | None:
+    """Yrittää rikastaa K-Ruoka-tuotteen Open Food Facts -tiedoilla."""
+    ean = str(product.get("ean", "")).strip()
+    if ean:
+        exact = get_by_barcode(ean)
+        if exact:
+            return exact
+
+    name = str(product.get("name", "")).strip()
+    if not name:
+        return None
+
+    hits = search_products(name)
+    if hits:
+        first = hits[0]
+        code_val = str(first.get("code", "")).strip()
+        if code_val:
+            full = get_by_barcode(code_val)
+            if full:
+                return full
+        return first
+    return None
+
+def show_product_detail(product: dict, show_alternatives: bool = False):
+    name = product.get("name", "Tuntematon tuote")
+    category = product.get("category", "")
+    brand = product.get("brand", "")
+    img = product.get("image_url")
+    ean = str(product.get("ean", ""))
+    product_url = product.get("product_url", "")
+    price_default = float(product.get("price") or 0)
+
+    off = find_off_match_for_kruoka(product)
+    eco = str((off or {}).get("ecoscore_grade", "-") or "-")
+    nutri = str((off or {}).get("nutrition_grades", "-") or "-")
+    nova = (off or {}).get("nova_group") or "-"
+    carbon_exact = (off or {}).get("carbon_footprint_from_known_ingredients_100g")
 
     col_img, col_info = st.columns([1, 2])
     with col_img:
@@ -795,160 +855,115 @@ def show_product_detail(product: dict, show_alternatives: bool = True):
         st.markdown(f"## {name}")
         if brand:
             st.markdown(f"*{brand}*")
-        if eco_score:
-            st.markdown(f"**Ympäristöpisteet:** {eco_stars(eco_score)} ({eco_score}/100)")
+        if category:
+            st.caption(f"Kategoria: {category}")
+        if ean:
+            st.caption(f"EAN: {ean}")
+        if product_url:
+            st.markdown(f"[🔗 Avaa K-Ruoassa]({product_url})")
 
     st.markdown("---")
-
-    # Kolme pääpistytystä vierekkäin selityksineen
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("### 🌿 Eco-Score")
-        st.markdown(grade_badge(eco), unsafe_allow_html=True)
-        st.markdown(f"<small>{eco_text(eco)}</small>", unsafe_allow_html=True)
+        if eco != "-":
+            st.markdown(grade_badge(eco), unsafe_allow_html=True)
+            st.markdown(f"<small>{eco_text(eco)}</small>", unsafe_allow_html=True)
+        else:
+            st.info("Ei löytynyt")
     with c2:
         st.markdown("### 🥗 Nutri-Score")
-        st.markdown(grade_badge(nutri), unsafe_allow_html=True)
-        st.markdown(f"<small>{nutri_text(nutri)}</small>", unsafe_allow_html=True)
+        if nutri != "-":
+            st.markdown(grade_badge(nutri), unsafe_allow_html=True)
+            st.markdown(f"<small>{nutri_text(nutri)}</small>", unsafe_allow_html=True)
+        else:
+            st.info("Ei löytynyt")
     with c3:
         st.markdown("### ⚙️ NOVA")
-        nova_str = f"NOVA {nova}" if nova else "?"
-        st.markdown(f"<span style='background:#1a5c2a;color:white;padding:3px 10px;border-radius:5px;font-weight:bold;'>{nova_str}</span>", unsafe_allow_html=True)
-        st.markdown(f"<small>{nova_text(nova)}</small>", unsafe_allow_html=True)
+        if nova != "-":
+            st.markdown(f"<span style='background:#1a5c2a;color:white;padding:3px 10px;border-radius:5px;font-weight:bold;'>NOVA {nova}</span>", unsafe_allow_html=True)
+            st.markdown(f"<small>{nova_text(nova)}</small>", unsafe_allow_html=True)
+        else:
+            st.info("Ei löytynyt")
+
+    if off:
+        st.caption("Open Food Facts -rikastus löytyi tälle tuotteelle.")
+    else:
+        st.caption("Open Food Facts -rikastusta ei löytynyt tälle tuotteelle, joten osa pisteistä puuttuu.")
 
     st.markdown("---")
-
-    # Fineli-täydennys
-    fin = fineli_enrich(product)
-    if fin:
-        st.markdown("---")
-        st.markdown("### 🍽️ Ravintosisältö (Fineli)")
-        show_fineli_card(fin)
-
-    # Hiilijalanjälki
-    st.markdown("### 🌍 Hiilijalanjälki")
-    # Käytä tarkkaa dataa jos saatavilla, muuten laske kategoriapohjainen arvio
-    carbon_display = carbon
-    carbon_is_estimate = False
-    if not carbon_display:
-        carbon_display = estimate_co2(product, 100)
-        carbon_is_estimate = True
-    if carbon_display:
-        context = carbon_context(carbon_display)
-        label = " *(Arvio)*" if carbon_is_estimate else ""
-        st.markdown(f"**{carbon_display:.1f} g CO₂e / 100 g**{label} &nbsp; {context}", unsafe_allow_html=True)
-        pct = min(carbon_display / 400 * 100, 100)
-        col = "#1e8449" if carbon_display < 80 else "#e67e22" if carbon_display < 200 else "#c0392b"
-        st.markdown(f"""
-        <div style="background:#e8f5ea;border-radius:8px;height:16px;">
-          <div style="background:{col};width:{pct:.0f}%;height:16px;border-radius:8px;"></div>
-        </div>
-        <small style="color:#1a5c2a;">🌱 Pieni &nbsp;→&nbsp; 🔴 Suuri (max näyttää 400 g)</small>
-        {"<br><small style='color:#7a7a7a;font-style:italic;'>* Arvio perustuu tuotekategoriaan. Tarkka data ei saatavilla.</small>" if carbon_is_estimate else ""}
-        """, unsafe_allow_html=True)
+    fin_hits = fineli_search(name)
+    if fin_hits:
+        st.markdown("### 🍽️ Ravintosisältö (Fineli-arvio)")
+        show_fineli_card(fin_hits[0])
     else:
-        st.info("Hiilijalanjälkitieto ei saatavilla. Eco-Score antaa suuntaa ympäristövaikutuksesta.")
+        st.info("Tälle tuotteelle ei löytynyt tarkkaa Fineli-osumaa. Näytetään hinnat ja kategoriapohjainen ympäristöarvio.")
 
+    st.markdown("### 🌍 Hiilijalanjälki")
+    carbon_100g = float(carbon_exact) if carbon_exact else estimate_co2(product, 100)
+    context = carbon_context(carbon_100g)
+    pct = min(carbon_100g / 400 * 100, 100)
+    col = "#1e8449" if carbon_100g < 80 else "#e67e22" if carbon_100g < 200 else "#c0392b"
+    label = "" if carbon_exact else " *(Arvio)*"
+    extra = "<small style='color:#7a7a7a;font-style:italic;'>* Arvio perustuu tuoteryhmään, koska tarkkaa hiilijalanjälkidataa ei ole saatavilla.</small>" if not carbon_exact else ""
+    st.markdown(f"**{carbon_100g:.1f} g CO₂e / 100 g**{label} &nbsp; {context}", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="background:#e8f5ea;border-radius:8px;height:16px;">
+      <div style="background:{col};width:{pct:.0f}%;height:16px;border-radius:8px;"></div>
+    </div>
+    <small style="color:#1a5c2a;">🌱 Pieni &nbsp;→&nbsp; 🔴 Suuri (max näyttää 400 g)</small><br>
+    {extra}
+    """, unsafe_allow_html=True)
 
-    # Sertifikaatit
-    labels = [l for l in product.get("labels_tags", [])
-              if any(k in l for k in ["organic","bio","fair","rainforest","msc","utz","eco","luomu"])]
-    if labels:
-        st.markdown("### 🏷️ Ympäristösertifikaatit")
-        for l in labels:
-            st.markdown(f"✅ **{l.replace('en:','').replace('fi:','').replace('-',' ').title()}**")
-
-    # Alkuperämaa
-    ctags = product.get("countries_tags") or []
-    if ctags:
-        origin = get_origin(ctags)
-        bg = origin_color(ctags)
-        st.markdown(f"""<div style='background:{bg};border-radius:8px;padding:10px 16px;margin:8px 0;display:inline-block'>
-<span style='font-size:1.05em'>🌐 <b>Alkuperämaa:</b> {origin}</span></div>""", unsafe_allow_html=True)
-
-    # Lisää ostoslistalle
     st.markdown("---")
     col_a, col_b, col_c = st.columns(3)
     with col_a:
-        qty = st.number_input("Kappalemäärä", 1, 50, 1, key=f"qty_{name[:15]}")
+        qty = st.number_input("Kappalemäärä", 1, 50, 1, key=f"qty_{ean or name[:15]}")
     with col_b:
-        price = st.number_input("Hinta (€)", 0.0, 200.0, 0.0, step=0.05, key=f"price_{name[:15]}")
+        price = st.number_input("Hinta (€)", 0.0, 500.0, float(price_default), step=0.05, key=f"price_{ean or name[:15]}")
     with col_c:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🛒 Lisää ostoslistalle", key=f"shop_{name[:15]}"):
+        if st.button("🛒 Lisää ostoslistalle", key=f"shop_{ean or name[:15]}"):
             item = {
-                "name": get_fi_name(product), "brand": brand, "eco": eco, "nutri": nutri, "nova": nova,
-                "carbon": carbon, "qty": qty, "price": price,
+                "name": name,
+                "brand": brand,
+                "category": category,
+                "eco": eco.lower() if eco != "-" else "-",
+                "nutri": nutri.lower() if nutri != "-" else "-",
+                "nova": nova,
+                "carbon": carbon_100g,
+                "qty": qty,
+                "price": price,
                 "date": datetime.now().strftime("%Y-%m-%d"),
-                "countries_tags": product.get("countries_tags", []),
+                "countries_tags": (off or {}).get("countries_tags", []),
+                "ean": ean,
+                "source": "K-Ruoka",
             }
             st.session_state.shopping.append(item)
             save_json(SHOPPING_FILE, st.session_state.shopping)
-            # ── Kestävyyspisteet ──────────────────────────────────────────────
-            _eco = str(eco).lower()
-            _nova = nova
-            _cats = " ".join(product.get("categories_tags") or []).lower()
-            _ctags = set(product.get("countries_tags") or [])
-            pts = 0; reasons = []
-            if _eco in ["a","b"]:
-                pts += 3; reasons.append(f"Eco {_eco.upper()}")
-            if any(k in _cats for k in ["plant","vegan","vegetable","legume","fruit","oat","soy","berry"]):
-                pts += 2; reasons.append("kasvistuote")
-            if _nova and str(_nova) in ["1","2"]:
-                pts += 1; reasons.append(f"NOVA {_nova}")
-            if "en:finland" in _ctags:
-                pts += 2; reasons.append("kotimainen 🇫🇮")
-            if pts > 0:
-                add_points(", ".join(reasons), pts, _eco)
-                st.toast(f"🌱 +{pts} pistettä! ({', '.join(reasons)})", icon="🏆")
             st.success(f"✅ {name} lisätty ostoslistalle!")
 
-    if st.button("📦 Lisää kaappitavaroihin (hävikinseuranta)", key=f"waste_{name[:15]}"):
+    if st.button("📦 Lisää kaappitavaroihin (hävikinseuranta)", key=f"waste_{ean or name[:15]}"):
         item = {
-            "name": name, "brand": brand,
+            "name": name,
+            "brand": brand,
+            "category": category,
             "added": datetime.now().strftime("%Y-%m-%d"),
-            "expiry": "", "qty": 1
+            "expiry": "",
+            "qty": 1,
+            "ean": ean,
+            "source": "K-Ruoka",
         }
         st.session_state.waste.append(item)
         save_json(WASTE_FILE, st.session_state.waste)
         st.success("✅ Lisätty kaappitavaroihin!")
 
-    # Vaihtoehdot
-    if show_alternatives:
-        st.markdown("---")
-        st.markdown("### 💡 Kestävämpiä vaihtoehtoja samasta kategoriasta")
-        st.caption("Nämä tuotteet ovat samasta tuoteryhmästä ja niillä on parempi Eco-Score A:")
-        with st.spinner("Etsitään vaihtoehtoja..."):
-            cats_str = ",".join(product.get("categories_tags", []))
-            alts = find_alternatives(cats_str, str(product.get("code", "")))
-        if alts:
-            alt_cols = st.columns(min(len(alts), 4))
-            for i, alt in enumerate(alts[:4]):
-                with alt_cols[i]:
-                    alt_img = alt.get("image_front_small_url")
-                    if alt_img:
-                        st.image(alt_img, width=80)
-                    st.markdown(f"**{alt.get('product_name','?')[:30]}**")
-                    st.markdown(grade_badge(alt.get("ecoscore_grade","?")), unsafe_allow_html=True)
-                    if st.button("Näytä", key=f"alt_{alt.get('code',i)}"):
-                        full = get_by_barcode(alt.get("code",""))
-                        if full:
-                            st.session_state.sel = full
-                            st.rerun()
-        else:
-            st.info("Vaihtoehtoja ei löydy tällä hetkellä – kokeile hakea itse eri tuotteita.")
-
 def show_product_card(p: dict):
-    name = get_fi_name(p)
-    brand = p.get("brands","")
-    eco = p.get("ecoscore_grade","?")
-    nutri = p.get("nutrition_grades","?")
-    nova = p.get("nova_group")
-    img = p.get("image_front_small_url")
-    code = p.get("code","")
-    eco_col = {"a":"🟢","b":"🟡","c":"🟠","d":"🔴","e":"🔴"}.get(str(eco).lower(),"⚪")
-    ctags = set(p.get("countries_tags") or [])
-    country_flag = "🇫🇮 " if ctags & NORDIC_COUNTRIES else ""
+    name = p.get("name", "Tuntematon tuote")
+    category = p.get("category", "")
+    img = p.get("image_url")
+    ean = str(p.get("ean", ""))
+    price = p.get("price")
 
     with st.container():
         st.markdown("<div class='product-card'>", unsafe_allow_html=True)
@@ -957,20 +972,18 @@ def show_product_card(p: dict):
             if img:
                 st.image(img, width=65)
         with c2:
-            origin_txt = get_origin(p.get("countries_tags") or [])
-            st.markdown(f"{country_flag}**{name}**")
-            if brand:
-                st.caption(f"{brand} · {origin_txt}")
-            st.markdown(
-                f"{eco_col} Eco: **{str(eco).upper()}** &nbsp;|&nbsp; 🥗 Nutri: **{str(nutri).upper()}** &nbsp;|&nbsp; ⚙️ NOVA: **{nova or '?'}**",
-                unsafe_allow_html=True)
+            st.markdown(f"**{name}**")
+            if category:
+                st.caption(category)
+            if price is not None:
+                st.markdown(f"💶 **{float(price):.2f} €**")
+            if ean:
+                st.caption(f"EAN: {ean}")
         with c3:
-            if st.button("Avaa →", key=f"open_{code}_{name[:8]}"):
-                full = get_by_barcode(code)
-                if full:
-                    st.session_state.sel = full
-                    st.session_state.view = "detail"
-                    st.rerun()
+            if st.button("Avaa →", key=f"open_{ean or name[:12]}"):
+                st.session_state.sel = p
+                st.session_state.view = "detail"
+                st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ── SIVUPALKKI ────────────────────────────────────────────────────────────────
@@ -979,14 +992,13 @@ with st.sidebar:
     st.caption("Kestävät valinnat helposti")
     st.markdown("---")
     page = st.radio("", [
-        "🔍 Hae tuotteita",
+        "🛒 Tuotehaku",
         "📷 Viivakoodihaku",
         "🛒 Ostoslista",
         "🗑️ Hävikinseuranta",
         "🗓️ Ateriasuunnittelija",
         "🏆 Kestävyyspisteet",
         "🇫🇮 Fineli-ravintohaku",
-        "🛒 K-Ruoka haku",
         "ℹ️ Tietoa pisteytyksistä"
     ], label_visibility="collapsed")
     st.markdown("---")
@@ -1026,69 +1038,70 @@ if st.session_state.view == "detail":
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── 1. HAE TUOTTEITA ──────────────────────────────────────────────────────────
-if "Hae" in page:
-    st.title("🔍 Hae tuotteita")
-    st.markdown("Löydä tuotteet ja tarkista niiden ympäristö- ja ravitsemustiedot ennen ostosta.")
+if "Tuotehaku" in page:
+    st.title("🛒 K-Ruoka tuotehaku")
+    st.markdown("Hae tuotteita suoraan K-Supermarket Myllypuron valikoimasta ja lisää ne ostoslistalle tai kaappitavaroihin.")
 
-    q = st.text_input("Hakusana", placeholder="esim. maito, oatly, fazer, lohi...")
-    sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Paras Eco-Score ensin", "Paras Nutri-Score ensin"])
+    q = st.text_input("Hakusana", placeholder="esim. maito, banaani, lohi, pasta...")
+    kaikki_kategoriat = sorted(set(p["category"] for p in KRUOKA_DB if p.get("category")))
+    sort_by = st.selectbox("Järjestä tulokset", ["Oletuksena", "Halvin ensin", "Kallein ensin", "Nimi A-Ö"])
+    valittu_kat = st.selectbox("Kategoria", ["Kaikki kategoriat"] + kaikki_kategoriat)
 
-    if q:
-        en_hint = _translate_query(q)
-        if en_hint.lower() != q.lower():
-            st.caption(f"🔎 Haetaan: **{en_hint}** · Näytetään vain suomalaiset ja pohjoismaiset tuotteet 🇫🇮")
-        else:
-            st.caption("🇫🇮 Näytetään vain suomalaiset ja pohjoismaiset tuotteet")
-        prog = st.progress(0, text="Haetaan tuotteita...")
-        products = search_products(q)
-        prog.progress(100, text="Valmis!")
-        prog.empty()
+    def kruoka_search(query: str, category: str) -> list:
+        qq = query.lower().strip()
+        results = []
+        for p in KRUOKA_DB:
+            if category != "Kaikki kategoriat" and p.get("category") != category:
+                continue
+            hay = f"{p.get('name','')} {p.get('category','')}".lower()
+            if qq and qq not in hay:
+                continue
+            results.append(p)
+        return results
+
+    if q or valittu_kat != "Kaikki kategoriat":
+        products = kruoka_search(q, valittu_kat)
+        if sort_by == "Halvin ensin":
+            products = sorted(products, key=lambda p: float(p.get("price") if p.get("price") is not None else 9999))
+        elif sort_by == "Kallein ensin":
+            products = sorted(products, key=lambda p: float(p.get("price") if p.get("price") is not None else -1), reverse=True)
+        elif sort_by == "Nimi A-Ö":
+            products = sorted(products, key=lambda p: p.get("name", "").lower())
 
         if products:
-            order = {"a":0,"b":1,"c":2,"d":3,"e":4}
-            if sort_by == "Paras Eco-Score ensin":
-                products = sorted(products, key=lambda p: order.get(str(p.get("ecoscore_grade","e")).lower(),5))
-            elif sort_by == "Paras Nutri-Score ensin":
-                products = sorted(products, key=lambda p: order.get(str(p.get("nutrition_grades","e")).lower(),5))
-
-            good_eco = sum(1 for p in products if str(p.get("ecoscore_grade","")).lower() in ["a","b"])
-            st.success(f"Löydettiin {len(products)} tuotetta – {good_eco} hyvällä Eco-Scorella (A/B) 🌿")
+            st.success(f"Löydettiin {len(products)} tuotetta K-Supermarket Myllypuron valikoimasta.")
             st.markdown("---")
-            for p in products:
+            for p in products[:100]:
                 show_product_card(p)
+            if len(products) > 100:
+                st.info("Näytetään ensimmäiset 100 tulosta. Rajaa hakua tarkemmaksi nähdäksesi vähemmän tuloksia.")
         else:
-            st.warning("Ei suomalaisia/pohjoismaisia tuloksia. Tätä tuotetta ei löydy Open Food Facts -tietokannasta Suomesta. Kokeile viivakoodiskannausta tai englanninkielistä nimeä (esim. 'salmon', 'oat milk').")
+            st.warning("Ei tuloksia tällä hakusanalla.")
     else:
         st.markdown("""
-        **Hakuvinkkejä 🌿**
-        - `maito` tai `kaura maito` – maitovaihtoehdot
-        - `lohi` – kalatuotteet
-        - `fazer` tai `valio` – brändihaku
-        - `luomu` – luomumerkityt tuotteet
-        - `kasvispohjainen` – kasvistuotteet
+        **Hakuvinkkejä 🛒**
+        - `maito` tai `kahvi`
+        - `pirkka` tai `valio`
+        - valitse kategoria nähdäksesi koko valikoiman ryhmittäin
         """)
 
-# ── 2. VIIVAKOODIHAKU ─────────────────────────────────────────────────────────
+# ── 2. VIIVAKOODIHAKU# ── 2. VIIVAKOODIHAKU ─────────────────────────────────────────────────────────
 elif "Viivakoodi" in page:
     st.title("📷 Viivakoodihaku")
-    st.markdown("Löytyy tuotteen pakkauksesta (EAN-13). Syötä numerot tähän.")
+    st.markdown("Hae tuote K-Supermarket Myllypuron valikoimasta viivakoodilla.")
 
     barcode = st.text_input("Viivakoodi", placeholder="esim. 6410405082657")
     if st.button("🔍 Hae") and barcode:
-        with st.spinner("Haetaan..."):
-            p = get_by_barcode(barcode.strip())
+        needle = barcode.strip()
+        p = next((x for x in KRUOKA_DB if str(x.get("ean", "")).strip() == needle), None)
         if p:
             st.session_state.sel = p
             show_product_detail(p)
         else:
-            st.error("Tuotetta ei löydy. Tarkista viivakoodi tai hae tuotteen nimellä.")
+            st.error("Tuotetta ei löydy tästä K-Ruoka-tuotelistasta. Tarkista viivakoodi.")
 
     st.markdown("---")
-    st.markdown("""
-    **Testaa näillä suomalaisilla viivakoodeilla:**
-    - `6410405082657` – Valio tuote
-    - `6416539002014` – Fazer
-    """)
+    st.caption("Viivakoodihaku käyttää vain K-Supermarket Myllypuron tuotetiedostoa.")
 
 # ── 3. OSTOSLISTA ─────────────────────────────────────────────────────────────
 elif "Ostoslista" in page:
@@ -1470,51 +1483,6 @@ elif "Fineli" in page:
     st.link_button("🌐 Avaa Fineli.fi (THL)", "https://fineli.fi/fineli/fi/index")
 
 # ── 6. TIETOA PISTEYTYKSISTÄ ──────────────────────────────────────────────────
-elif "K-Ruoka haku" in page:
-    st.markdown("## 🛒 K-Supermarket Myllypuro")
-    st.caption("770 tuotetta suoraan K-Supermarket Myllypuron valikoimasta")
-
-    haku = st.text_input("🔍 Hae tuotetta nimellä", placeholder="esim. maito, lohi, pasta...")
-    kaikki_kategoriat = sorted(set(p["category"] for p in KRUOKA_DB if p["category"]))
-    valittu_kat = st.selectbox("📂 Suodata kategorialla", ["Kaikki kategoriat"] + kaikki_kategoriat)
-
-    def kruoka_haku(query: str, kategoria: str) -> list:
-        q = query.lower().strip()
-        tulokset = []
-        for p in KRUOKA_DB:
-            if kategoria != "Kaikki kategoriat" and p["category"] != kategoria:
-                continue
-            if q and q not in p["name"].lower():
-                continue
-            tulokset.append(p)
-        return tulokset[:50]
-
-    tulokset = kruoka_haku(haku, valittu_kat)
-
-    if not haku and valittu_kat == "Kaikki kategoriat":
-        st.info("Kirjoita hakusana tai valitse kategoria nähdäksesi tuotteet.")
-    elif not tulokset:
-        st.warning("Ei tuloksia. Kokeile eri hakusanaa.")
-    else:
-        st.markdown(f"**{len(tulokset)} tuotetta löytyi**")
-        cols_per_row = 3
-        rows = [tulokset[i:i+cols_per_row] for i in range(0, len(tulokset), cols_per_row)]
-        for row in rows:
-            cols = st.columns(cols_per_row)
-            for col, p in zip(cols, row):
-                with col:
-                    if p.get("image_url"):
-                        st.image(p["image_url"], width=120)
-                    st.markdown(f"**{p['name']}**")
-                    st.caption(p["category"])
-                    if p["price"] is not None:
-                        st.markdown(f"💶 **{p['price']:.2f} €**")
-                    else:
-                        st.caption("Hinta ei saatavilla")
-                    if p.get("product_url"):
-                        st.markdown(f"[🔗 K-Ruoka sivulle]({p['product_url']})")
-                    st.divider()
-
 elif "Tietoa" in page:
     st.title("ℹ️ Mitä pisteet tarkoittavat?")
     st.markdown("Tässä on selkeä selitys kaikille pisteytyksille.")
